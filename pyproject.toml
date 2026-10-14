@@ -7,7 +7,9 @@ authors = [
     { name = "Mikoushi", email = "eduardo.ramarti@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "fastapi[standard]>=0.143.0",
+]
 
 [project.scripts]
 kansho = "kansho:main"
