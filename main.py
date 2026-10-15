@@ -119,6 +119,14 @@ class MovieUpdate(BaseModel):
     rating: float
     description: str
 
+class MoviePatch(BaseModel):
+    title: str | None = None
+    year: int | None = None
+    genres: List[str] | None = None
+    director: str | None = None
+    rating: float | None = None
+    description: str | None = None
+
 
 @app.get("/")
 def root():
@@ -168,7 +176,7 @@ def get_movie(
 
 
 @app.post("/create_movie", status_code=201)
-def post_movie(movie_json: MovieBase):
+def create_movie(movie_json: MovieCreate):
     new_id = uuid4().hex
     new_movie = {
         "id": new_id,
@@ -184,7 +192,7 @@ def post_movie(movie_json: MovieBase):
 
 
 @app.put("/movies/{movie_id}")
-def update_movie(movie_id: str, data: dict = Body(...)):
+def update_movie(movie_id: str, data: MovieUpdate):
     for movie in MOVIES:
         if movie["id"] == movie_id:
             if "title" in data: movie["title"] = data["title"]
@@ -194,6 +202,20 @@ def update_movie(movie_id: str, data: dict = Body(...)):
             if "rating" in data: movie["rating"] = data["rating"]
             if "description" in data: movie["description"] = data["description"]
             return {"message": "Movie updated", "data": movie}
+    raise HTTPException(status_code=404, detail="Movie not found")
+
+
+@app.patch("/movies/{movie_id}")
+def update_movie_patch(movie_id: str, data: MoviePatch):
+    for movie in MOVIES:
+        payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
+        if "title" in payload: movie["title"] = payload["title"]
+        if "year" in payload: movie["year"] = payload["year"]
+        if "genres" in payload: movie["genres"] = payload["genres"]
+        if "director" in payload: movie["director"] = payload["director"]
+        if "rating" in payload: movie["rating"] = payload["rating"]
+        if "description" in payload: movie["description"] = payload["description"]
+        return {"message": "Movie updated", "data": movie}
     raise HTTPException(status_code=404, detail="Movie not found")
 
 
