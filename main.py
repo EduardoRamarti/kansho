@@ -1,8 +1,8 @@
-from typing import List
+from datetime import datetime
 from uuid import uuid4
 
-from fastapi import Body, FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 
 MOVIES = [
     {
@@ -103,18 +103,45 @@ app = FastAPI(title="kansho")
 class MovieBase(BaseModel):
     title: str
     year: int
-    genres: List[str]
+    genres: list[str]
     director: str
     rating: float
     description: str
 
-class MovieCreate(MovieBase):
-    pass
+class MovieCreate(BaseModel):
+    title: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        description="Movie's title ( min 3 chars and max 100 chars)",
+        examples=["Matrix"]
+    )
+    year: int | None = datetime.now().year
+    genres: list[str] = Field(
+        ...,
+        description="Movie's genres",
+        examples=[["Drama", "Humor", "Thriller"]]
+    )
+    director: str = Field(
+        ...,
+        min_length=10,
+        max_length=50,
+        description="Movie's director",
+        examples=["Lana and Lilly Wachowski"]
+    )
+    rating: float | None = 0.0
+    description: str = Field(
+        ...,
+        min_length=50,
+        max_length=400,
+        description="Movie's description ( min 50 chars and max 300 chars)",
+        examples=["A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential."]
+    )
 
 class MovieUpdate(BaseModel):
     title: str
     year: int
-    genres: List[str]
+    genres: list[str]
     director: str
     rating: float
     description: str
@@ -122,7 +149,7 @@ class MovieUpdate(BaseModel):
 class MoviePatch(BaseModel):
     title: str | None = None
     year: int | None = None
-    genres: List[str] | None = None
+    genres: list[str] | None = None
     director: str | None = None
     rating: float | None = None
     description: str | None = None
@@ -210,12 +237,13 @@ def update_movie_patch(movie_id: str, data: MoviePatch):
     for movie in MOVIES:
         if movie["id"] == movie_id:
             payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
-            if "title" in payload: movie["title"] = payload["title"]
-            if "year" in payload: movie["year"] = payload["year"]
-            if "genres" in payload: movie["genres"] = payload["genres"]
-            if "director" in payload: movie["director"] = payload["director"]
-            if "rating" in payload: movie["rating"] = payload["rating"]
-            if "description" in payload: movie["description"] = payload["description"]
+            # if "title" in payload: movie["title"] = payload["title"]
+            # if "year" in payload: movie["year"] = payload["year"]
+            # if "genres" in payload: movie["genres"] = payload["genres"]
+            # if "director" in payload: movie["director"] = payload["director"]
+            # if "rating" in payload: movie["rating"] = payload["rating"]
+            # if "description" in payload: movie["description"] = payload["description"]
+            movie.update(payload)
             return {"message": "Movie updated", "data": movie}
     raise HTTPException(status_code=404, detail="Movie not found")
 
