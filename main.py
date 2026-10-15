@@ -195,12 +195,12 @@ def create_movie(movie_json: MovieCreate):
 def update_movie(movie_id: str, data: MovieUpdate):
     for movie in MOVIES:
         if movie["id"] == movie_id:
-            if "title" in data: movie["title"] = data["title"]
-            if "year" in data: movie["year"] = data["year"]
-            if "genres" in data: movie["genres"] = data["genres"]
-            if "director" in data: movie["director"] = data["director"]
-            if "rating" in data: movie["rating"] = data["rating"]
-            if "description" in data: movie["description"] = data["description"]
+            if "title" in data: movie["title"] = data.title
+            if "year" in data: movie["year"] = data.year
+            if "genres" in data: movie["genres"] = data.genres
+            if "director" in data: movie["director"] = data.director
+            if "rating" in data: movie["rating"] = data.rating
+            if "description" in data: movie["description"] = data.description
             return {"message": "Movie updated", "data": movie}
     raise HTTPException(status_code=404, detail="Movie not found")
 
@@ -208,14 +208,15 @@ def update_movie(movie_id: str, data: MovieUpdate):
 @app.patch("/movies/{movie_id}")
 def update_movie_patch(movie_id: str, data: MoviePatch):
     for movie in MOVIES:
-        payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
-        if "title" in payload: movie["title"] = payload["title"]
-        if "year" in payload: movie["year"] = payload["year"]
-        if "genres" in payload: movie["genres"] = payload["genres"]
-        if "director" in payload: movie["director"] = payload["director"]
-        if "rating" in payload: movie["rating"] = payload["rating"]
-        if "description" in payload: movie["description"] = payload["description"]
-        return {"message": "Movie updated", "data": movie}
+        if movie["id"] == movie_id:
+            payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
+            if "title" in payload: movie["title"] = payload["title"]
+            if "year" in payload: movie["year"] = payload["year"]
+            if "genres" in payload: movie["genres"] = payload["genres"]
+            if "director" in payload: movie["director"] = payload["director"]
+            if "rating" in payload: movie["rating"] = payload["rating"]
+            if "description" in payload: movie["description"] = payload["description"]
+            return {"message": "Movie updated", "data": movie}
     raise HTTPException(status_code=404, detail="Movie not found")
 
 
