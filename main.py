@@ -1,8 +1,9 @@
 from datetime import datetime
+from typing import Union
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 MOVIES = [
     {
@@ -137,14 +138,42 @@ class MovieCreate(BaseModel):
         description="Movie's description ( min 50 chars and max 300 chars)",
         examples=["A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential."]
     )
+    @field_validator("title")
+    @classmethod
+    def not_allowed_title(cls, value:str) -> str:
+        if "spam" in value.lower():
+            raise ValueError("The title cannot set this word: 'spam'")
+        return value
 
 class MovieUpdate(BaseModel):
-    title: str
+    title: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        description="Movie's title ( min 3 chars and max 100 chars)",
+        examples=["Matrix"]
+    )
     year: int
-    genres: list[str]
-    director: str
+    genres: list[str] = Field(
+        ...,
+        description="Movie's genres",
+        examples=[["Drama", "Humor", "Thriller"]]
+    )
+    director: str = Field(
+        ...,
+        min_length=10,
+        max_length=50,
+        description="Movie's director",
+        examples=["Lana and Lilly Wachowski"]
+    )
     rating: float
-    description: str
+    description: str = Field(
+        ...,
+        min_length=50,
+        max_length=400,
+        description="Movie's description ( min 50 chars and max 300 chars)",
+        examples=["A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential."]
+    )
 
 class MoviePatch(BaseModel):
     title: str | None = None
@@ -155,54 +184,62 @@ class MoviePatch(BaseModel):
     description: str | None = None
 
 
+# Response Models 
+class MoviePublic(MovieBase):
+    id: str
+
+class MovieSumary(BaseModel):
+    id: str
+    title: str
+    director: str
+    year: int
+
+class MovieCreateResponse(MoviePublic):
+    message: str
+
+class MovieUpdateResponse(MoviePatch):
+    message: str
+
 @app.get("/")
 def root():
     return {"message": "Hello world"}
 
 
-@app.get("/movies")
+@app.get("/movies", response_model=list[MoviePublic])
 def list_movies(
     movie_name: str | None = Query(
         default=None, description="Search a movie by tittle"
     ),
 ):
     if movie_name:
-        results = [
-            movie
-            for movie in MOVIES
-            if movie_name.lower().strip() in movie["title"].lower()
-        ]
-        return {"data": results, "query": movie_name}
+        return [ movie for movie in MOVIES if movie_name.lower().strip() in movie["title"].lower()]
     else:
-        return {"data": MOVIES}
+        return MOVIES
 
 
-@app.get("/movies/{movie_id}")
+# response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
+@app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
 def get_movie(
     movie_id: str,
     detailed: bool = Query(
         default=True, description="Include detailes about the movie"
     ),
 ):
-    if detailed:
-        for movie in MOVIES:
-            if movie["id"] == movie_id:
-                return {"data": movie}
-    else:
-        for movie in MOVIES:
-            if movie["id"] == movie_id:
-                return {
-                    "data": {
-                        "id": movie["id"],
-                        "title": movie["title"],
-                        "director": movie["director"],
-                        "year": movie["year"],
-                    }
+    for movie in MOVIES:
+        if movie['id'] == movie_id:
+            if detailed:
+                return movie
+            return {
+                    "id": movie["id"],
+                    "title": movie["title"],
+                    "director": movie["director"],
+                    "year": movie["year"]
                 }
     raise HTTPException(status_code=404, detail="Movie Not Found")
 
 
-@app.post("/create_movie", status_code=201)
+
+@app.post("/create_movie", status_code=201, response_model=MovieCreateResponse)
 def create_movie(movie_json: MovieCreate):
     new_id = uuid4().hex
     new_movie = {
@@ -215,24 +252,29 @@ def create_movie(movie_json: MovieCreate):
         "description" : movie_json.description,
     }
     MOVIES.append(new_movie)
-    return {"message": "Movie created", "data": new_movie}
+    new_movie['message']="Movie Created"
+    return  new_movie
 
 
-@app.put("/movies/{movie_id}")
+
+@app.put("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
 def update_movie(movie_id: str, data: MovieUpdate):
     for movie in MOVIES:
         if movie["id"] == movie_id:
-            if "title" in data: movie["title"] = data.title
-            if "year" in data: movie["year"] = data.year
-            if "genres" in data: movie["genres"] = data.genres
-            if "director" in data: movie["director"] = data.director
-            if "rating" in data: movie["rating"] = data.rating
-            if "description" in data: movie["description"] = data.description
-            return {"message": "Movie updated", "data": movie}
+            movie["title"] = data.title
+            movie["year"] = data.year
+            movie["genres"] = data.genres
+            movie["director"] = data.director
+            movie["rating"] = data.rating
+            movie["description"] = data.description
+            # El operador ** (unpacking) "abre" el diccionario de la película.
+            # **movie "desempaqueta" el diccionario original, extrayendo todas sus llaves y valores al nivel principal para crear un diccionario plano.
+            return { **movie, "message":"Movie Updated"} 
     raise HTTPException(status_code=404, detail="Movie not found")
 
 
-@app.patch("/movies/{movie_id}")
+
+@app.patch("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated", response_model_exclude_none=True) #exclude_none quita los que tengan none de la respuesta
 def update_movie_patch(movie_id: str, data: MoviePatch):
     for movie in MOVIES:
         if movie["id"] == movie_id:
@@ -244,8 +286,9 @@ def update_movie_patch(movie_id: str, data: MoviePatch):
             # if "rating" in payload: movie["rating"] = payload["rating"]
             # if "description" in payload: movie["description"] = payload["description"]
             movie.update(payload)
-            return {"message": "Movie updated", "data": movie}
+            return {"message":"Movie Updated", **movie}
     raise HTTPException(status_code=404, detail="Movie not found")
+
 
 
 @app.delete("/movies/{movie_id}", status_code=204)
