@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Union
+from typing import Literal, Union
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 MOVIES = [
@@ -220,13 +220,42 @@ def root():
 @app.get("/movies", response_model=list[MoviePublic])
 def list_movies(
     movie_name: str | None = Query(
-        default=None, description="Search a movie by tittle"
+        default=None, 
+        description="Search a movie by tittle",
+        alias="search",
+        min_length=3,
+        max_length=50,
+        pattern=r"^[\w\sáéíóúÁÉÍÓÚüÜ-]+$"
     ),
+    # Set a limit for how manny movies show per page
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=50,
+        description="Total results (1-50)"
+    ),
+    # Set where to start showing the movies, example: from which movie start 
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Avoid items before create the list"
+    ),
+    # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras. 
+    # Si el usuario intenta mandar "year" o cualquier otra cosa, FastAPI lo bloquea automáticamente con un error 422.
+    order_by: Literal["title", "director"] = Query(
+        "title", description="Order by Movie title"
+    ),
+    direction: Literal["asc", "desc"] = Query(
+        "asc", description="Order direction"
+    )
 ):
+
+    results = MOVIES
+    
     if movie_name:
-        return [ movie for movie in MOVIES if movie_name.lower().strip() in movie["title"].lower()]
-    else:
-        return MOVIES
+        results = [ movie for movie in results if movie_name.lower().strip() in movie["title"].lower()]
+    results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
+    return results[offset: offset+limit]
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
