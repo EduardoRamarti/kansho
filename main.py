@@ -212,12 +212,20 @@ class MovieCreateResponse(MoviePublic):
 class MovieUpdateResponse(MoviePatch):
     message: str
 
+
+class PaginatedMovies(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: list[MoviePublic]
+
+
 @app.get("/")
 def root():
     return {"message": "Hello world"}
 
 
-@app.get("/movies", response_model=list[MoviePublic])
+@app.get("/movies", response_model=PaginatedMovies)
 def list_movies(
     movie_name: str | None = Query(
         default=None, 
@@ -254,8 +262,14 @@ def list_movies(
     
     if movie_name:
         results = [ movie for movie in results if movie_name.lower().strip() in movie["title"].lower()]
+
+    total = len(results)
+
     results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
-    return results[offset: offset+limit]
+
+    items = results[offset: offset+limit]
+
+    return PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
