@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Union
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query
@@ -259,7 +259,8 @@ def list_movies(
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
-@app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
+# @app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
+@app.get("/movies/{movie_id}", response_model=MoviePublic | MovieSumary, response_description="Movie Found")
 def get_movie(
     movie_id: UUID,
     detailed: bool = Query(
