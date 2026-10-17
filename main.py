@@ -213,7 +213,6 @@ class MovieCreateResponse(MoviePublic):
 class MovieUpdateResponse(MoviePatch):
     message: str
 
-
 class PaginatedMovies(BaseModel):
     page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
     per_page: int
@@ -230,6 +229,7 @@ class PaginatedMovies(BaseModel):
 @app.get("/")
 def root():
     return {"message": "Hello world"}
+
 
 
 @app.get("/movies", response_model=PaginatedMovies)
@@ -292,6 +292,26 @@ def list_movies(
         search=movie_name,
         items=items
     )
+
+
+
+@app.get("/movies/by-genre", response_model=list[MoviePublic])
+def filter_by_genres(
+    genres: list[str] = Query(
+        ...,
+        min_length=1,
+        description="One or more genres. Example ?genres=drama&genres=humor"
+    )
+):
+    genre_lower = [genre.lower() for genre in genres]
+
+    return [
+        movie
+        for movie in MOVIES
+        # any() devuelve True si al menos uno de los géneros de la película coincide con los buscados (deteniéndose en la primera coincidencia para ahorrar recursos).
+        if any(genre['name'].lower() in genre_lower for genre in movie.get("genres", []))
+]
+
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
