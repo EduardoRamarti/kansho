@@ -1,4 +1,5 @@
 from datetime import datetime
+from math import ceil
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -214,9 +215,15 @@ class MovieUpdateResponse(MoviePatch):
 
 
 class PaginatedMovies(BaseModel):
+    page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
+    per_page: int
     total: int
-    limit: int
-    offset: int
+    total_pages: int
+    has_prev: bool
+    has_next: bool
+    order_by: str
+    direction: str
+    search: str | None
     items: list[MoviePublic]
 
 
@@ -243,10 +250,10 @@ def list_movies(
         description="Total results (1-50)"
     ),
     # Set where to start showing the movies, example: from which movie start 
-    offset: int = Query(
-        default=0,
-        ge=0,
-        description="Avoid items before create the list"
+    page: int = Query(
+        default=1,
+        ge=1,
+        description="Set page to show items"
     ),
     # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras. 
     # Si el usuario intenta mandar "year" o cualquier otra cosa, FastAPI lo bloquea automáticamente con un error 422.
@@ -257,19 +264,34 @@ def list_movies(
         "asc", description="Order direction"
     )
 ):
-
     results = MOVIES
     
     if movie_name:
-        results = [ movie for movie in results if movie_name.lower().strip() in movie["title"].lower()]
+        movie_name = movie_name.lower().strip()
+        results = [ movie for movie in results if movie_name in movie["title"].lower()]
 
     total = len(results)
+    total_pages = ceil(total/limit)
 
     results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
-
-    items = results[offset: offset+limit]
-
-    return PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
+    start = (page*limit)-limit
+    end = min(page*limit, total)
+    items = results[ start : end ]
+    has_prev = start>=limit
+    has_next = end<total
+    # PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
+    return PaginatedMovies(
+        page=page,
+        per_page=limit,
+        total=total,
+        total_pages=total_pages,
+        has_prev=has_prev,
+        has_next=has_next,
+        order_by=order_by,
+        direction=direction,
+        search=movie_name,
+        items=items
+    )
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
