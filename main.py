@@ -234,6 +234,11 @@ def root():
 
 @app.get("/movies", response_model=PaginatedMovies)
 def list_movies(
+    name: str | None = Query(
+        default=None,
+        deprecated=True,
+        description="Deprecated param, use 'search' instead"
+    ),
     movie_name: str | None = Query(
         default=None, 
         description="Search a movie by tittle",
@@ -265,6 +270,7 @@ def list_movies(
     )
 ):
     results = MOVIES
+    movie_name = movie_name or name
     
     if movie_name:
         movie_name = movie_name.lower().strip()
