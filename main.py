@@ -1,10 +1,74 @@
+import os
 from datetime import datetime
 from math import ceil
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import (
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    create_engine,
+    func,
+    select,
+)
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
+
+#Para conectarse a la BD, si no hay un env crea un sqlite
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./movies.db")
+print("Connected to: ", DATABASE_URL)
+
+engine_kwargs = {}
+
+if DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False} # si es sqlite apagar hilos para asincronismo 
+
+engine = create_engine(DATABASE_URL, echo=True, future=True, **engine_kwargs) # echo imprime el codigo SQL puro. future, version 2 de sqlalchemy 
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session) 
+# sessionmaker configura la fábrica de sesiones:
+# - bind=engine: Conecta las sesiones a tu motor de base de datos físico.
+# - autocommit=False: Exige usar db.commit() manualmente, protegiendo transacciones complejas para no guardar datos a medias.
+# - autoflush=False: Evita que SQLAlchemy sincronice datos a la BD de forma automática y prematura antes del commit.
+# - class_=Session: Instancia la clase estándar de SQLAlchemy para darnos acceso a los métodos .query(), .add(), etc.
+
+class Base(DeclarativeBase):
+    pass
+
+class MovieORM(Base):
+    __tablename__ = "movies" #set table name
+
+    # Attributes for colums
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    # genres: Mapped[list["Genres"]] = relationship
+    # director: Mapped[str] = mapped_column(String(100), nullable=False)
+    rating: Mapped[float] = mapped_column(Float, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+Base.metadata.create_all(bind=engine) #dev enviroment
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 MOVIES = [
     {
@@ -127,6 +191,14 @@ class MovieBase(BaseModel):
     rating: float
     description: str
 
+class MovieBaseTemp(BaseModel):
+    title: str
+    year: int
+    # genres: list[Genre]
+    # director: Director
+    rating: float
+    description: str
+
 class MovieCreate(BaseModel):
     title: str = Field(
         ...,
@@ -201,14 +273,28 @@ class MoviePatch(BaseModel):
 class MoviePublic(MovieBase):
     id: UUID
 
+    model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
+
+class MoviePublicTemp(MovieBaseTemp):
+    id: UUID
+
+    model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
+
+
 class MovieSumary(BaseModel):
     id: UUID
     title: str
     director: Director
     year: int
 
-class MovieCreateResponse(MoviePublic):
-    message: str
+class MovieCreateResponse(BaseModel):
+    id: UUID
+    title: str
+    year: int
+    rating: float
+    description: str
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class MovieUpdateResponse(MoviePatch):
     message: str
@@ -225,6 +311,17 @@ class PaginatedMovies(BaseModel):
     search: str | None
     items: list[MoviePublic]
 
+class PaginatedMoviesTemp(BaseModel):
+    page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
+    per_page: int
+    total: int
+    total_pages: int
+    has_prev: bool
+    has_next: bool
+    order_by: str
+    direction: str
+    search: str | None
+    items: list[MoviePublicTemp]
 
 @app.get("/")
 def root():
@@ -232,7 +329,7 @@ def root():
 
 
 
-@app.get("/movies", response_model=PaginatedMovies)
+@app.get("/movies", response_model=PaginatedMoviesTemp)
 def list_movies(
     name: str | None = Query(
         default=None,
@@ -267,26 +364,41 @@ def list_movies(
     ),
     direction: Literal["asc", "desc"] = Query(
         "asc", description="Order direction"
-    )
+    ),
+    db: Session = Depends(get_db)
 ):
-    results = MOVIES
+    results = select(MovieORM) #select como un select de sql
     movie_name = movie_name or name
     
     if movie_name:
         movie_name = movie_name.lower().strip()
-        results = [ movie for movie in results if movie_name in movie["title"].lower()]
+        results = results.where(MovieORM.title.ilike(f"%{movie_name}%"))
 
-    total = len(results)
+
+    total = db.scalar(select(func.count()).select_from(results.subquery())) or 0
     total_pages = ceil(total/limit)
 
-    results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
-    start = (page*limit)-limit
-    end = min(page*limit, total)
-    items = results[ start : end ]
-    has_prev = start>=limit
-    has_next = end<total
+    order_col = func.lower(MovieORM.title) # or func.lower(MovieORM.director) 
+    print(f"order_col: {order_col}")
+    results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+
+    # results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
+    # start = (page*limit)-limit
+    # end = min(page*limit, total)
+    # items = results[ start : end ]
+
+
+    if total_pages == 0:
+        items: list[MovieORM] = []
+        has_prev = False
+        has_next = False 
+    else:
+        start = (page-1)*limit
+        items = db.execute(results.limit(limit).offset(start)).scalars().all()
+        has_prev = page > 1
+        has_next = page < total_pages
     # PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
-    return PaginatedMovies(
+    return PaginatedMoviesTemp(
         page=page,
         per_page=limit,
         total=total,
@@ -343,9 +455,27 @@ def get_movie(
 
 
 
-@app.post("/create_movie", status_code=201, response_model=MovieCreateResponse)
-def create_movie(movie_json: MovieCreate):
-    new_id = uuid4().hex
+@app.post("/create_movie", status_code=status.HTTP_201_CREATED, response_model=MovieCreateResponse, response_description="Movie created (ok)")
+def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
+
+    new_id = uuid4()
+    new_movie = MovieORM(
+        id=new_id,
+        title=movie_json.title, 
+        year=movie_json.year,
+        rating=movie_json.rating,
+        description=movie_json.description
+    )
+    try: 
+        db.add(new_movie)
+        db.commit()
+        db.refresh(new_movie)
+        return new_movie
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"🔥 ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error creating movie")
+    
     # new_movie = {
     #     "id": new_id,
     #     "title": movie_json.title,
@@ -355,10 +485,10 @@ def create_movie(movie_json: MovieCreate):
     #     "rating" : movie_json.rating,
     #     "description" : movie_json.description,
     # }
-    new_movie = movie_json.model_dump()
-    new_movie["id"] = new_id
-    MOVIES.append(new_movie)
-    return  {**new_movie, "message":"Movie created"}
+    # new_movie = movie_json.model_dump()
+    # new_movie["id"] = new_id
+    # MOVIES.append(new_movie)
+    # return  {**new_movie, "message":"Movie created"}
 
 
 
