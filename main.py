@@ -64,11 +64,11 @@ class MovieORM(Base):
 Base.metadata.create_all(bind=engine) #dev enviroment
 
 def get_db():
-    db = SessionLocal()
+    db = SessionLocal() # 1. Crea una sesión exclusiva para la petición HTTP entrante.
     try:
-        yield db
+        yield db # 2. Pausa la función y le "presta" la sesión al endpoint para que haga sus consultas.
     finally:
-        db.close()
+        db.close() # 3. Al terminar (con éxito o error), obliga a cerrar la conexión para evitar saturar la BD.
 
 MOVIES = [
     {
@@ -367,34 +367,48 @@ def list_movies(
     ),
     db: Session = Depends(get_db)
 ):
-    results = select(MovieORM) #select como un select de sql
+    # select() "redacta" la consulta SQL (equivale a SELECT * FROM tabla).
+    # Tambine podria ser: select(MovieORM.title) → (equivalente a SELECT title FROM tabla)
+    results = select(MovieORM)
     movie_name = movie_name or name
     
     if movie_name:
         movie_name = movie_name.lower().strip()
+        # Concatena dinámicamente la cláusula WHERE a la consulta base. Sobreescribimos 'results' porque .where() devuelve una consulta nueva.
         results = results.where(MovieORM.title.ilike(f"%{movie_name}%"))
 
 
     total = db.scalar(select(func.count()).select_from(results.subquery())) or 0
+    # 4. Viaja a la BD, ejecuta la consulta y rompe la tupla resultante para darnos el número entero puro (ej. 15).
+    # 3. Prepara la instrucción "SELECT COUNT(*)".
+    # 2. Prepara la instrucción "FROM" indicando de dónde va a contar.
+    # 1. Toma nuestra consulta base (con todos sus filtros WHERE), la encierra en paréntesis y la vuelve una "tabla temporal".
+    # 5. Defensa de Python: Si el conteo por alguna razón falla y devuelve 'None', asigna '0' por defecto.
+
     total_pages = ceil(total/limit)
 
-    order_col = func.lower(MovieORM.title) # or func.lower(MovieORM.director) 
-    print(f"order_col: {order_col}")
+    # Convertimos la columna a minúsculas solo para el cálculo del orden.
+    order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
+    # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
     results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
 
     # results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
     # start = (page*limit)-limit
     # end = min(page*limit, total)
     # items = results[ start : end ]
-
+    if page > total_pages and total > 0:
+        page = 1
 
     if total_pages == 0:
         items: list[MovieORM] = []
         has_prev = False
         has_next = False 
     else:
-        start = (page-1)*limit
-        items = db.execute(results.limit(limit).offset(start)).scalars().all()
+        skip = (page-1)*limit
+        #db.execute(): Viaja a la BD y trae los registros (en formato de tuplas).
+        # .scalars(): Rompe las tuplas y extrae el objeto MovieORM puro.
+        # .all(): Recolecta todos los objetos puros y los mete en una lista de Python [MovieORM, MovieORM].
+        items = db.execute(results.limit(limit).offset(skip)).scalars().all()
         has_prev = page > 1
         has_next = page < total_pages
     # PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
