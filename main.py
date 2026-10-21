@@ -16,6 +16,7 @@ from sqlalchemy import (
     create_engine,
     func,
     select,
+    update,
 )
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import (
@@ -268,11 +269,18 @@ class MoviePatch(BaseModel):
     rating: float | None = None
     description: str | None = None
 
+class MoviePatchTemp(BaseModel):
+    title: str | None = None
+    year: int | None = None
+    rating: float | None = None
+    description: str | None = None
 
 # Response Models 
 class MoviePublic(MovieBase):
     id: UUID
 
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
     model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
 
 class MoviePublicTemp(MovieBaseTemp):
@@ -287,18 +295,29 @@ class MovieSumary(BaseModel):
     director: Director
     year: int
 
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
+    model_config = ConfigDict(from_attributes=True)
+
+class MovieSumaryTemp(BaseModel):
+    id: UUID
+    title: str
+
+    model_config = ConfigDict(from_attributes=True)
+
 class MovieCreateResponse(BaseModel):
     id: UUID
     title: str
     year: int
     rating: float
     description: str
-    
+
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
     model_config = ConfigDict(from_attributes=True)
 
-class MovieUpdateResponse(MoviePatch):
-    message: str
-
+class MovieUpdateResponse(MoviePatchTemp):
+    model_config = ConfigDict(from_attributes=True)
 class PaginatedMovies(BaseModel):
     page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
     per_page: int
@@ -448,24 +467,24 @@ def filter_by_genres(
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
 # @app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
-@app.get("/movies/{movie_id}", response_model=MoviePublic | MovieSumary, response_description="Movie Found")
+@app.get("/movies/{movie_id}", response_model=MoviePublicTemp | MovieSumaryTemp, response_description="Movie Found")
 def get_movie(
     movie_id: UUID,
     detailed: bool = Query(
         default=True, description="Include detailes about the movie"
     ),
+    db: Session = Depends(get_db)
 ):
-    for movie in MOVIES:
-        if movie['id'] == movie_id.hex:
-            if detailed:
-                return movie
-            return {
-                    "id": movie["id"],
-                    "title": movie["title"],
-                    "director": movie["director"],
-                    "year": movie["year"]
-                }
-    raise HTTPException(status_code=404, detail="Movie Not Found")
+    movie = db.get(MovieORM, movie_id) # obtiene un solo registro de la db utilizando unicamente su identificador
+
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    if detailed:
+        # model_validate() → Traduce y valida manualmente un objeto crudo de SQLAlchemy a este esquema de Pydantic.
+        # (Nota: FastAPI hace esto en automático al salir si el endpoint tiene 'response_model').
+        return MoviePublicTemp.model_validate(movie, from_attributes=True) 
+    return MovieSumaryTemp.model_validate(movie, from_attributes=True)
 
 
 
@@ -487,7 +506,7 @@ def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
         return new_movie
     except SQLAlchemyError as e:
         db.rollback()
-        print(f"🔥 ERROR DE SQLALCHEMY: {e}")
+        print(f"ERROR DE SQLALCHEMY: {e}")
         raise HTTPException(status_code=500, detail="Error creating movie")
     
     # new_movie = {
@@ -506,20 +525,36 @@ def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
 
 
 
+# @app.put("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
 @app.put("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
-def update_movie(movie_id: str, data: MovieUpdate):
-    for movie in MOVIES:
-        if movie["id"] == movie_id:
-            movie["title"] = data.title
-            movie["year"] = data.year
-            movie["genres"] = data.genres
-            movie["director"] = data.director
-            movie["rating"] = data.rating
-            movie["description"] = data.description
-            # El operador ** (unpacking) "abre" el diccionario de la película.
-            # **movie "desempaqueta" el diccionario original, extrayendo todas sus llaves y valores al nivel principal para crear un diccionario plano.
-            return { **movie, "message":"Movie Updated"} 
-    raise HTTPException(status_code=404, detail="Movie not found")
+def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db)):
+    movie = db.get(MovieORM, movie_id)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    movie_update =( update(MovieORM).where(MovieORM.id == movie_id).values(title=data.title,year=data.year,rating=data.rating,description=data.description) )
+    print(f"mod_movie: {movie_update}")
+    try: 
+        db.execute(movie_update)
+        db.commit()
+        return movie
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error updating movie")
+
+    # for movie in MOVIES:
+    #     if movie["id"] == movie_id:
+    #         movie["title"] = data.title
+    #         movie["year"] = data.year
+    #         movie["genres"] = data.genres
+    #         movie["director"] = data.director
+    #         movie["rating"] = data.rating
+    #         movie["description"] = data.description
+    #         # El operador ** (unpacking) "abre" el diccionario de la película.
+    #         # **movie "desempaqueta" el diccionario original, extrayendo todas sus llaves y valores al nivel principal para crear un diccionario plano.
+    #         return { **movie, "message":"Movie Updated"} 
+    # raise HTTPException(status_code=404, detail="Movie not found")
 
 
 
