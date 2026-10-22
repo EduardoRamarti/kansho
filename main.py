@@ -7,18 +7,23 @@ from uuid import UUID, uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
+    Column,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     String,
+    Table,
     Text,
+    UniqueConstraint,
     Uuid,
     create_engine,
+    delete,
     func,
     select,
     update,
 )
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -49,18 +54,79 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, clas
 class Base(DeclarativeBase):
     pass
 
+
+
+class DirectorORM(Base):
+    __tablename__ = "directors"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    
+    # Relación uno a muchos: un director tiene varias películas.
+    # movies No crea columna en "directors"; la FK real está en movies.director_id. (tabla de movies)
+    # back_populates="director" la sincroniza con MovieORM.director (ambos nombres deben coincidir).
+    movies: Mapped[list["MovieORM"]] = relationship(back_populates="director")
+
+
+
+movie_genres = Table( # Es una Table, NO una clase ORM
+    "movie_genres", #nombre de la tabla
+    Base.metadata, # la registra junto a tus otras tablas para que se cree al hacer create_all
+    # Se crean las columnas movie_id, genre_id
+    # Ambas son primary_key, de esta manera solo se registra una combinacion por relacion: m1 - g1, m1-g2, etc...
+    # ondelete="CASCADE": es una regla en la base de datos. Si borras una película (o un género), sus filas en movie_genres se borran automáticamente. Solo se borra el vínculo, no el género ni la película del otro lado.
+    Column("movie_id", ForeignKey("movies.id", ondelete="CASCADE"), primary_key=True),
+    Column("genre_id", ForeignKey("genres.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+
+class GenreORM(Base):
+    __tablename__ = "genres"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+
+    # Mapped[list["MovieORM"]]: scifi.movies devuelve la lista de películas de ese género. "MovieORM" va entre comillas porque esa clase se define más abajo.
+    # secondary=movie_genres: le dice a SQLAlchemy “para llegar del otro lado, pasa por esta tabla intermedia”
+    # back_populates="genres": apunta a MovieORM.genres.
+    # lazy="selectin" carga las películas de inmediato en una consulta extra (WHERE ... IN).
+    movies: Mapped[list["MovieORM"]] = relationship(
+        secondary=movie_genres,
+        back_populates="genres",
+        lazy="selectin"
+    )
+
+
+
 class MovieORM(Base):
     __tablename__ = "movies" #set table name
+    __table_args__ = (UniqueConstraint("title", name="unique_movie_title"),)
 
     # Attributes for colums
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    year: Mapped[int] = mapped_column(Integer, nullable=False)
-    # genres: Mapped[list["Genres"]] = relationship
-    # director: Mapped[str] = mapped_column(String(100), nullable=False)
-    rating: Mapped[float] = mapped_column(Float, nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    rating: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    director_id: Mapped[UUID] = mapped_column(ForeignKey("directors.id")) # Crea la columna de director como FK
+    # Relación muchos a uno: cada película tiene un director.
+    # No crea columna; usa director_id para cargar el objeto DirectorORM completo
+    # (peli.director.name en vez de buscar el director a mano con el id).
+    # back_populates="movies" apunta al atributo DirectorORM.movies:
+    # ambos lados se sincronizan en memoria (al asignar peli.director, nolan.movies se actualiza solo)
+    director: Mapped[DirectorORM] = relationship(back_populates="movies")
+
+    # list[...], porque es muchos a muchos.
+    # secondary=movie_genres: le dice a SQLAlchemy “para llegar del otro lado, pasa por esta tabla intermedia”
+    # back_populates: sincroniza los dos lados en memoria (peli.genres ↔ scifi.movies).
+    # lazy="selectin": controla cuándo se cargan los datos. Al consultar películas, SQLAlchemy trae de inmediato sus géneros en una segunda consulta con WHERE movie_id IN (...)
+    # passive_deletes=True: le dice a SQLAlchemy “no borres tú las filas de movie_genres cuando elimine una película; deja que la base de datos lo haga con el CASCADE”
+    genres: Mapped[list[GenreORM]]= relationship(secondary = movie_genres, back_populates="movies", lazy="selectin",passive_deletes=True)
+
+
 
 Base.metadata.create_all(bind=engine) #dev enviroment
 
@@ -504,6 +570,9 @@ def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_movie)
         return new_movie
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This title already exist")
     except SQLAlchemyError as e:
         db.rollback()
         print(f"ERROR DE SQLALCHEMY: {e}")
@@ -570,9 +639,24 @@ def update_movie_patch(movie_id: str, data: MoviePatch):
 
 
 @app.delete("/movies/{movie_id}", status_code=204)
-def delete_movie(movie_id: str):
-    for index, movie in enumerate(MOVIES):
-        if movie["id"] == movie_id:
-            MOVIES.pop(index)
-            return 
-    raise HTTPException(status_code=404, detail="Movie not found")
+def delete_movie(movie_id: UUID, db: Session = Depends(get_db)):
+    movie = db.get(MovieORM, movie_id)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    delete_movie = delete(MovieORM).where(MovieORM.id == movie_id)
+
+    try:
+        db.execute(delete_movie)
+        db.commit()
+        return 
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting movie")
+
+    # for index, movie in enumerate(MOVIES):
+    #     if movie["id"] == movie_id:
+    #         MOVIES.pop(index)
+    #         return 
+    # raise HTTPException(status_code=404, detail="Movie not found")
