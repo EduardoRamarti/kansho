@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from math import ceil
+from operator import ge
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -108,7 +109,7 @@ class MovieORM(Base):
     title: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     rating: Mapped[float] = mapped_column(Float, nullable=False, index=True)
-    description: Mapped[str] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     director_id: Mapped[UUID] = mapped_column(ForeignKey("directors.id")) # Crea la columna de director como FK
@@ -354,7 +355,6 @@ class MoviePublicTemp(MovieBaseTemp):
 
     model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
 
-
 class MovieSumary(BaseModel):
     id: UUID
     title: str
@@ -382,8 +382,9 @@ class MovieCreateResponse(BaseModel):
     # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
     model_config = ConfigDict(from_attributes=True)
 
-class MovieUpdateResponse(MoviePatchTemp):
+class MovieUpdateResponse(MoviePatch):
     model_config = ConfigDict(from_attributes=True)
+
 class PaginatedMovies(BaseModel):
     page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
     per_page: int
@@ -557,13 +558,40 @@ def get_movie(
 @app.post("/create_movie", status_code=status.HTTP_201_CREATED, response_model=MovieCreateResponse, response_description="Movie created (ok)")
 def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
 
-    new_id = uuid4()
+    if db.scalar(select(MovieORM).where(MovieORM.title.ilike(movie_json.title.strip()))):
+        raise HTTPException(status_code=409, detail="Movie already exists")
+
+    director = db.scalar(select(DirectorORM).where(DirectorORM.name.ilike(movie_json.director.name.strip())))
+    
+    if not director:
+        director = DirectorORM(
+            id=uuid4(),
+            name=movie_json.director.name.strip()
+        )
+
+    genres_set= set()
+    genres_list=[]
+    for i in movie_json.genres:
+        genre_name = i.name.strip().title()
+        if genre_name in genres_set:
+            continue
+        genre = db.scalar(select(GenreORM).where(GenreORM.name.ilike(genre_name))) 
+        genres_set.add(genre_name)
+        if not genre:
+            genre = GenreORM(
+                id=uuid4(),
+                name=genre_name
+            )
+        genres_list.append(genre)
+
     new_movie = MovieORM(
-        id=new_id,
-        title=movie_json.title, 
+        id=uuid4(),
+        title=movie_json.title.strip(), 
         year=movie_json.year,
         rating=movie_json.rating,
-        description=movie_json.description
+        description=movie_json.description,
+        director=director,
+        genres=genres_list
     )
     try: 
         db.add(new_movie)
