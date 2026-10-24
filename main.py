@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 from math import ceil
-from operator import ge
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -241,6 +240,7 @@ class Genre(BaseModel):
         description="Movie's genre", 
         examples=["Drama", "Humor", "Thriller"]
         )
+    model_config = ConfigDict(from_attributes=True)
 
 class Director(BaseModel):
     name: str = Field(
@@ -248,8 +248,9 @@ class Director(BaseModel):
         min_length=3, 
         max_length=30, 
         description="Movie's director name", 
-        examples=["Christopher Nolan"]
+        examples=["Steven Spielberg"]
     )
+    model_config = ConfigDict(from_attributes=True)
 
 class MovieBase(BaseModel):
     title: str
@@ -259,41 +260,34 @@ class MovieBase(BaseModel):
     rating: float
     description: str
 
-class MovieBaseTemp(BaseModel):
-    title: str
-    year: int
-    # genres: list[Genre]
-    # director: Director
-    rating: float
-    description: str
-
 class MovieCreate(BaseModel):
     title: str = Field(
         ...,
         min_length=3,
         max_length=100,
         description="Movie's title ( min 3 chars and max 100 chars)",
-        examples=["Matrix"]
+        examples=["Jurassic Park"]
     )
     # default_factory ejecuta la función cada vez que se crea un nuevo objeto, garantizando que el valor sea dinámico (como la hora actual) y no se quede "congelado" al iniciar el servidor.
     # DEFAULT FACTORY (Dinámico): Se usa para valores que requieren ejecutar una función.
     # Como el año o un ID, que necesitan calcularse en el milisegundo exacto de la petición.
-    year: int | None = Field(default_factory=lambda: datetime.now().year)
+    # year: int = Field(default_factory=lambda: datetime.now().year)
+    year: int | None = Field(default_factory=lambda: datetime.now().year, examples=[1973])
     genres: list[Genre] = Field(
         ...,
         min_length=1,
         max_length=5,
         description="Movie's genres",
-        examples=[[{"name":"Drama"}, {"name":"Humor"}, {"name":"Thriller"}]]
+        examples=[[{"name": "Adventure"}, {"name": "Science Fiction"}, {"name": "Thriller"}]]
     )
     director: Director 
-    rating: float | None = 10.0
+    rating: float | None = 8.2
     description: str = Field(
         ...,
         min_length=50,
         max_length=400,
         description="Movie's description ( min 50 chars and max 300 chars)",
-        examples=["A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential."]
+        examples=["A billionaire creates a theme park populated by genetically engineered dinosaurs, but a security failure causes the prehistoric creatures to escape, leaving a group of visitors fighting to survive."]
     )
     @field_validator("title")
     @classmethod
@@ -350,11 +344,6 @@ class MoviePublic(MovieBase):
     # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
     model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
 
-class MoviePublicTemp(MovieBaseTemp):
-    id: UUID
-
-    model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
-
 class MovieSumary(BaseModel):
     id: UUID
     title: str
@@ -397,17 +386,7 @@ class PaginatedMovies(BaseModel):
     search: str | None
     items: list[MoviePublic]
 
-class PaginatedMoviesTemp(BaseModel):
-    page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
-    per_page: int
-    total: int
-    total_pages: int
-    has_prev: bool
-    has_next: bool
-    order_by: str
-    direction: str
-    search: str | None
-    items: list[MoviePublicTemp]
+
 
 @app.get("/")
 def root():
@@ -415,7 +394,7 @@ def root():
 
 
 
-@app.get("/movies", response_model=PaginatedMoviesTemp)
+@app.get("/movies", response_model=PaginatedMovies)
 def list_movies(
     name: str | None = Query(
         default=None,
@@ -446,7 +425,7 @@ def list_movies(
     # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras. 
     # Si el usuario intenta mandar "year" o cualquier otra cosa, FastAPI lo bloquea automáticamente con un error 422.
     order_by: Literal["title", "director"] = Query(
-        "title", description="Order by Movie title"
+        "title", description="Order by Movie title or Movie Director"
     ),
     direction: Literal["asc", "desc"] = Query(
         "asc", description="Order direction"
@@ -459,7 +438,7 @@ def list_movies(
     movie_name = movie_name or name
     
     if movie_name:
-        movie_name = movie_name.lower().strip()
+        movie_name = movie_name.strip()
         # Concatena dinámicamente la cláusula WHERE a la consulta base. Sobreescribimos 'results' porque .where() devuelve una consulta nueva.
         results = results.where(MovieORM.title.ilike(f"%{movie_name}%"))
 
@@ -473,10 +452,19 @@ def list_movies(
 
     total_pages = ceil(total/limit)
 
-    # Convertimos la columna a minúsculas solo para el cálculo del orden.
-    order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
-    # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
-    results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+    # # Convertimos la columna a minúsculas solo para el cálculo del orden.
+    # order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
+    # # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
+    # results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+
+    if order_by == "title":
+        order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
+        # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
+        results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+    else: 
+        results = results.join(MovieORM.director).order_by(DirectorORM.name.asc() if direction == "asc" else DirectorORM.name.desc())
+        #.order_by(MovieORM.asc() if direction == "asc" else order_col.desc())
+        print(f"query: {results}")
 
     # results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
     # start = (page*limit)-limit
@@ -495,10 +483,11 @@ def list_movies(
         # .scalars(): Rompe las tuplas y extrae el objeto MovieORM puro.
         # .all(): Recolecta todos los objetos puros y los mete en una lista de Python [MovieORM, MovieORM].
         items = db.execute(results.limit(limit).offset(skip)).scalars().all()
+        
         has_prev = page > 1
         has_next = page < total_pages
     # PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
-    return PaginatedMoviesTemp(
+    return PaginatedMovies(
         page=page,
         per_page=limit,
         total=total,
@@ -534,7 +523,7 @@ def filter_by_genres(
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
 # @app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
-@app.get("/movies/{movie_id}", response_model=MoviePublicTemp | MovieSumaryTemp, response_description="Movie Found")
+@app.get("/movies/{movie_id}", response_model=MoviePublic | MovieSumaryTemp, response_description="Movie Found")
 def get_movie(
     movie_id: UUID,
     detailed: bool = Query(
@@ -550,7 +539,7 @@ def get_movie(
     if detailed:
         # model_validate() → Traduce y valida manualmente un objeto crudo de SQLAlchemy a este esquema de Pydantic.
         # (Nota: FastAPI hace esto en automático al salir si el endpoint tiene 'response_model').
-        return MoviePublicTemp.model_validate(movie, from_attributes=True) 
+        return MoviePublic.model_validate(movie, from_attributes=True) 
     return MovieSumaryTemp.model_validate(movie, from_attributes=True)
 
 
