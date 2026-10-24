@@ -464,7 +464,6 @@ def list_movies(
     else: 
         results = results.join(MovieORM.director).order_by(DirectorORM.name.asc() if direction == "asc" else DirectorORM.name.desc())
         #.order_by(MovieORM.asc() if direction == "asc" else order_col.desc())
-        print(f"query: {results}")
 
     # results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
     # start = (page*limit)-limit
@@ -508,16 +507,18 @@ def filter_by_genres(
         ...,
         min_length=1,
         description="One or more genres. Example ?genres=drama&genres=humor"
-    )
+    ),
+    db: Session = Depends(get_db)
 ):
-    genre_lower = [genre.lower() for genre in genres]
+    genre_lower = [genre.title() for genre in genres]
 
-    return [
-        movie
-        for movie in MOVIES
-        # any() devuelve True si al menos uno de los géneros de la película coincide con los buscados (deteniéndose en la primera coincidencia para ahorrar recursos).
-        if any(genre['name'].lower() in genre_lower for genre in movie.get("genres", []))
-]
+    
+    # return [
+    #     movie
+    #     for movie in MOVIES
+    #     # any() devuelve True si al menos uno de los géneros de la película coincide con los buscados (deteniéndose en la primera coincidencia para ahorrar recursos).
+    #     if any(genre['name'].lower() in genre_lower for genre in movie.get("genres", []))
+    # ]
 
 
 
