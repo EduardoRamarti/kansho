@@ -419,7 +419,7 @@ def filter_by_genres(
     ),
     db: Session = Depends(get_db)
 ):
-    genre_list = [genre.title() for genre in genres]
+    genre_list = [genre.strip().title() for genre in genres]
 
     results = db.scalars(select(MovieORM).distinct().join(MovieORM.genres).where(GenreORM.name.in_(genre_list))).all()
 
@@ -558,13 +558,68 @@ def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db
 
 
 @app.patch("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated", response_model_exclude_none=True) #exclude_none quita los que tengan none de la respuesta
-def update_movie_patch(movie_id: str, data: MoviePatch):
-    for movie in MOVIES:
-        if movie["id"] == movie_id:
-            payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
-            movie.update(payload)
-            return {"message":"Movie Updated", **movie}
-    raise HTTPException(status_code=404, detail="Movie not found")
+def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(get_db)):
+
+    record = db.get(MovieORM, movie_id)
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    if data.title and db.scalar(select(MovieORM).where(MovieORM.title.ilike(data.title.strip()), MovieORM.id != movie_id)):
+        raise HTTPException(status_code=409, detail="Movie already exists")
+
+    update_data = data.model_dump(exclude_unset=True)
+    director = update_data.pop("director", None)
+    genres = update_data.pop("genres", None)
+
+    for k,v in update_data.items():
+        setattr(record,k,v)
+
+    if director:
+        director_record = db.scalar(select(DirectorORM).where(DirectorORM.name.ilike(f"{director['name']}")))
+        if not director_record:
+            director_record = DirectorORM(
+                        id=uuid4(),
+                        name=director['name'].strip()
+                    )
+        record.director = director_record
+
+    genres_set= set()
+    genres_list=[]
+    if genres is not None:
+        for i in genres:
+            genre_name = i.get("name")
+            genre_name = genre_name.strip().title()
+            if genre_name in genres_set:
+                continue
+            genre = db.scalar(select(GenreORM).where(GenreORM.name.ilike(genre_name))) 
+            genres_set.add(genre_name)
+            if not genre:
+                genre = GenreORM(
+                    id=uuid4(),
+                    name=genre_name
+                )
+            genres_list.append(genre)
+        record.genres = genres_list
+
+    try: 
+        db.commit()
+        db.refresh(record)
+        return record
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This title already exist")
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error updating movie")
+
+    # for movie in MOVIES:
+    #     if movie["id"] == movie_id:
+    #         payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
+    #         movie.update(payload)
+    #         return {"message":"Movie Updated", **movie}
+    # raise HTTPException(status_code=404, detail="Movie not found")
 
 
 
