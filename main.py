@@ -1,103 +1,145 @@
+import os
 from datetime import datetime
 from math import ceil
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    create_engine,
+    delete,
+    func,
+    select,
+    update,
+)
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
-MOVIES = [
-    {
-        "id": "ce473c72a82b4121b0b28c0f9f79e680",
-        "title": "Interstellar",
-        "year": 2014,
-        "genres": [{"name": "Science Fiction"}, {"name": "Drama"}, {"name": "Adventure"}],
-        "director": {"name": "Christopher Nolan"},
-        "rating": 8.7,
-        "description": "A team of astronauts travels through a wormhole in search of a habitable planet to save humanity from an environmental crisis on Earth, while one father struggles with the cost of leaving his family behind.",
-    },
-    {
-        "id": "ec51efd4a5e24c3ab11ec95e93fe9253",
-        "title": "Titanic",
-        "year": 1997,
-        "genres": [{"name": "Romance"}, {"name": "Drama"}, {"name": "History"}],
-        "director": {"name": "James Cameron"},
-        "rating": 7.9,
-        "description": "A young aristocratic woman and a free-spirited artist from different social classes fall in love aboard the RMS Titanic, facing personal conflicts and tragedy when the ship strikes an iceberg.",
-    },
-    {
-        "id": "139a9ea658484738b227f7dec6acd36e",
-        "title": "The Godfather",
-        "year": 1972,
-        "genres": [{"name": "Crime"}, {"name": "Drama"}, {"name": "Thriller"}],
-        "director": {"name": "Francis Ford Coppola"},
-        "rating": 9.2,
-        "description": "The aging patriarch of a powerful Italian-American crime family passes control of his empire to his reluctant youngest son, Michael Corleone, whose pursuit of power transforms him into a ruthless mafia leader.",
-    },
-    {
-        "id": "43621b55c4ef46ee9f34e6df3bffcdc5",
-        "title": "Jurassic Park",
-        "year": 1993,
-        "genres": [{"name": "Adventure"}, {"name": "Science Fiction"}, {"name": "Thriller"}],
-        "director": {"name": "Steven Spielberg"},
-        "rating": 8.2,
-        "description": "A billionaire creates a theme park populated by genetically engineered dinosaurs, but a security failure causes the prehistoric creatures to escape, leaving a group of visitors fighting to survive.",
-    },
-    {
-        "id": "ba73f214efcf4ff2a882be40e5985302",
-        "title": "Coco",
-        "year": 2017,
-        "genres": [{"name": "Animation"}, {"name": "Adventure"}, {"name": "Comedy"}, {"name": "Family"}],
-        "director": {"name": "Lee Unkrich"},
-        "rating": 8.4,
-        "description": "Miguel, a young boy who dreams of becoming a musician despite his family's ban on music, accidentally enters the Land of the Dead, where he uncovers family secrets and discovers the importance of remembering loved ones.",
-    },
-    {
-        "id": "55b5e0a0960a496a82417f6271bb7215",
-        "title": "The Matrix",
-        "year": 1999,
-        "genres": [{"name": "Science Fiction"}, {"name": "Action"}, {"name": "Thriller"}],
-        "director": {"name": "Lana and Lilly Wachowski"},
-        "rating": 8.7,
-        "description": "A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential.",
-    },
-    {
-        "id": "28e2fd3e93f040488aa4849f46ec5145",
-        "title": "Toy Story",
-        "year": 1995,
-        "genres": [{"name": "Animation"}, {"name": "Adventure"}, {"name": "Comedy"}, {"name": "Family"}],
-        "director": {"name": "John Lasseter"},
-        "rating": 8.3,
-        "description": "When a new action figure named Buzz Lightyear becomes the favorite toy of their owner, Andy, Woody the cowboy doll grows jealous. The two rivals become lost together and must work as a team to return home.",
-    },
-    {
-        "id": "bfc32b9c78f241b78792408a3081b6fa",
-        "title": "Gladiator",
-        "year": 2000,
-        "genres": [{"name": "Action"}, {"name": "Drama"}, {"name": "Adventure"}, {"name": "History"}],
-        "director": {"name": "Ridley Scott"},
-        "rating": 8.5,
-        "description": "After a corrupt Roman emperor murders his family and condemns him to slavery, a once-renowned general named Maximus becomes a gladiator and seeks justice and revenge in the arena.",
-    },
-    {
-        "id": "59e0b72fc09b46c685cde928583a113d",
-        "title": "Avatar",
-        "year": 2009,
-        "genres": [{"name": "Science Fiction"}, {"name": "Action"}, {"name": "Adventure"}, {"name": "Fantasy"}],
-        "director": {"name": "James Cameron"},
-        "rating": 7.9,
-        "description": "A paraplegic former Marine travels to Pandora, an alien moon rich in natural resources, where he inhabits a genetically engineered body and becomes torn between the human mission and protecting the indigenous Na'vi people.",
-    },
-    {
-        "id": "031fc790fc564712846ade624e6b5751",
-        "title": "Back to the Future",
-        "year": 1985,
-        "genres": [{"name": "Science Fiction"}, {"name": "Adventure"}, {"name": "Comedy"}],
-        "director": {"name": "Robert Zemeckis"},
-        "rating": 8.5,
-        "description": "Teenager Marty McFly accidentally travels back to 1955 in a time machine built by eccentric scientist Doc Brown. He must ensure his future parents fall in love while finding a way to return to his own time.",
-    },
-]
+load_dotenv()
+
+#Para conectarse a la BD, si no hay un env crea un sqlite
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./movies.db")
+#print("Connected to: ", DATABASE_URL)
+
+engine_kwargs = {}
+
+if DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False} # si es sqlite apagar hilos para asincronismo 
+
+engine = create_engine(DATABASE_URL, echo=True, future=True, **engine_kwargs) # echo imprime el codigo SQL puro. future, version 2 de sqlalchemy 
+
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session) 
+# sessionmaker configura la fábrica de sesiones:
+# - bind=engine: Conecta las sesiones a tu motor de base de datos físico.
+# - autocommit=False: Exige usar db.commit() manualmente, protegiendo transacciones complejas para no guardar datos a medias.
+# - autoflush=False: Evita que SQLAlchemy sincronice datos a la BD de forma automática y prematura antes del commit.
+# - class_=Session: Instancia la clase estándar de SQLAlchemy para darnos acceso a los métodos .query(), .add(), etc.
+
+class Base(DeclarativeBase):
+    pass
+
+
+
+class DirectorORM(Base):
+    __tablename__ = "directors"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    
+    # Relación uno a muchos: un director tiene varias películas.
+    # movies No crea columna en "directors"; la FK real está en movies.director_id. (tabla de movies)
+    # back_populates="director" la sincroniza con MovieORM.director (ambos nombres deben coincidir).
+    movies: Mapped[list["MovieORM"]] = relationship(back_populates="director")
+
+
+
+movie_genres = Table( # Es una Table, NO una clase ORM
+    "movie_genres", #nombre de la tabla
+    Base.metadata, # la registra junto a tus otras tablas para que se cree al hacer create_all
+    # Se crean las columnas movie_id, genre_id
+    # Ambas son primary_key, de esta manera solo se registra una combinacion por relacion: m1 - g1, m1-g2, etc...
+    # ondelete="CASCADE": es una regla en la base de datos. Si borras una película (o un género), sus filas en movie_genres se borran automáticamente. Solo se borra el vínculo, no el género ni la película del otro lado.
+    Column("movie_id", ForeignKey("movies.id", ondelete="CASCADE"), primary_key=True),
+    Column("genre_id", ForeignKey("genres.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+
+class GenreORM(Base):
+    __tablename__ = "genres"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+
+    # Mapped[list["MovieORM"]]: scifi.movies devuelve la lista de películas de ese género. "MovieORM" va entre comillas porque esa clase se define más abajo.
+    # secondary=movie_genres: le dice a SQLAlchemy “para llegar del otro lado, pasa por esta tabla intermedia”
+    # back_populates="genres": apunta a MovieORM.genres.
+    # lazy="selectin" carga las películas de inmediato en una consulta extra (WHERE ... IN).
+    movies: Mapped[list["MovieORM"]] = relationship(
+        secondary=movie_genres,
+        back_populates="genres",
+        lazy="selectin"
+    )
+
+
+
+class MovieORM(Base):
+    __tablename__ = "movies" #set table name
+    __table_args__ = (UniqueConstraint("title", name="unique_movie_title"),)
+
+    # Attributes for colums
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    rating: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    director_id: Mapped[UUID] = mapped_column(ForeignKey("directors.id")) # Crea la columna de director como FK
+    # Relación muchos a uno: cada película tiene un director.
+    # No crea columna; usa director_id para cargar el objeto DirectorORM completo
+    # (peli.director.name en vez de buscar el director a mano con el id).
+    # back_populates="movies" apunta al atributo DirectorORM.movies:
+    # ambos lados se sincronizan en memoria (al asignar peli.director, nolan.movies se actualiza solo)
+    director: Mapped[DirectorORM] = relationship(back_populates="movies")
+
+    # list[...], porque es muchos a muchos.
+    # secondary=movie_genres: le dice a SQLAlchemy “para llegar del otro lado, pasa por esta tabla intermedia”
+    # back_populates: sincroniza los dos lados en memoria (peli.genres ↔ scifi.movies).
+    # lazy="selectin": controla cuándo se cargan los datos. Al consultar películas, SQLAlchemy trae de inmediato sus géneros en una segunda consulta con WHERE movie_id IN (...)
+    # passive_deletes=True: le dice a SQLAlchemy “no borres tú las filas de movie_genres cuando elimine una película; deja que la base de datos lo haga con el CASCADE”
+    genres: Mapped[list[GenreORM]]= relationship(secondary = movie_genres, back_populates="movies", lazy="selectin",passive_deletes=True)
+
+
+
+Base.metadata.create_all(bind=engine) #dev enviroment
+
+def get_db():
+    db = SessionLocal() # 1. Crea una sesión exclusiva para la petición HTTP entrante.
+    try:
+        yield db # 2. Pausa la función y le "presta" la sesión al endpoint para que haga sus consultas.
+    finally:
+        db.close() # 3. Al terminar (con éxito o error), obliga a cerrar la conexión para evitar saturar la BD.
+
 
 app = FastAPI(title="kansho")
 
@@ -109,6 +151,7 @@ class Genre(BaseModel):
         description="Movie's genre", 
         examples=["Drama", "Humor", "Thriller"]
         )
+    model_config = ConfigDict(from_attributes=True)
 
 class Director(BaseModel):
     name: str = Field(
@@ -116,8 +159,9 @@ class Director(BaseModel):
         min_length=3, 
         max_length=30, 
         description="Movie's director name", 
-        examples=["Christopher Nolan"]
+        examples=["Steven Spielberg"]
     )
+    model_config = ConfigDict(from_attributes=True)
 
 class MovieBase(BaseModel):
     title: str
@@ -133,27 +177,28 @@ class MovieCreate(BaseModel):
         min_length=3,
         max_length=100,
         description="Movie's title ( min 3 chars and max 100 chars)",
-        examples=["Matrix"]
+        examples=["Jurassic Park"]
     )
     # default_factory ejecuta la función cada vez que se crea un nuevo objeto, garantizando que el valor sea dinámico (como la hora actual) y no se quede "congelado" al iniciar el servidor.
     # DEFAULT FACTORY (Dinámico): Se usa para valores que requieren ejecutar una función.
     # Como el año o un ID, que necesitan calcularse en el milisegundo exacto de la petición.
-    year: int | None = Field(default_factory=lambda: datetime.now().year)
+    # year: int = Field(default_factory=lambda: datetime.now().year)
+    year: int | None = Field(default_factory=lambda: datetime.now().year, examples=[1973])
     genres: list[Genre] = Field(
         ...,
         min_length=1,
         max_length=5,
         description="Movie's genres",
-        examples=[[{"name":"Drama"}, {"name":"Humor"}, {"name":"Thriller"}]]
+        examples=[[{"name": "Adventure"}, {"name": "Science Fiction"}, {"name": "Thriller"}]]
     )
     director: Director 
-    rating: float | None = 10.0
+    rating: float | None = 8.2
     description: str = Field(
         ...,
         min_length=50,
         max_length=400,
         description="Movie's description ( min 50 chars and max 300 chars)",
-        examples=["A computer hacker named Neo discovers that the world he knows is a simulated reality created by intelligent machines. Joining a rebellion, he fights to free humanity and uncover his extraordinary potential."]
+        examples=["A billionaire creates a theme park populated by genetically engineered dinosaurs, but a security failure causes the prehistoric creatures to escape, leaving a group of visitors fighting to survive."]
     )
     @field_validator("title")
     @classmethod
@@ -196,10 +241,19 @@ class MoviePatch(BaseModel):
     rating: float | None = None
     description: str | None = None
 
+class MoviePatchTemp(BaseModel):
+    title: str | None = None
+    year: int | None = None
+    rating: float | None = None
+    description: str | None = None
 
 # Response Models 
 class MoviePublic(MovieBase):
     id: UUID
+
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
+    model_config = ConfigDict(from_attributes=True) # Para que pydantic sepa que va a recibir datos de sqlalchemy
 
 class MovieSumary(BaseModel):
     id: UUID
@@ -207,11 +261,29 @@ class MovieSumary(BaseModel):
     director: Director
     year: int
 
-class MovieCreateResponse(MoviePublic):
-    message: str
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
+    model_config = ConfigDict(from_attributes=True)
+
+class MovieSumaryTemp(BaseModel):
+    id: UUID
+    title: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+class MovieCreateResponse(BaseModel):
+    id: UUID
+    title: str
+    year: int
+    rating: float
+    description: str
+
+    # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
+    # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
+    model_config = ConfigDict(from_attributes=True)
 
 class MovieUpdateResponse(MoviePatch):
-    message: str
+    model_config = ConfigDict(from_attributes=True)
 
 class PaginatedMovies(BaseModel):
     page: int #= Field(..., min_length=1, description="Page calculated from amount of results")
@@ -224,6 +296,7 @@ class PaginatedMovies(BaseModel):
     direction: str
     search: str | None
     items: list[MoviePublic]
+
 
 
 @app.get("/")
@@ -263,28 +336,66 @@ def list_movies(
     # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras. 
     # Si el usuario intenta mandar "year" o cualquier otra cosa, FastAPI lo bloquea automáticamente con un error 422.
     order_by: Literal["title", "director"] = Query(
-        "title", description="Order by Movie title"
+        "title", description="Order by Movie title or Movie Director"
     ),
     direction: Literal["asc", "desc"] = Query(
         "asc", description="Order direction"
-    )
+    ),
+    db: Session = Depends(get_db)
 ):
-    results = MOVIES
+    # select() "redacta" la consulta SQL (equivale a SELECT * FROM tabla).
+    # Tambine podria ser: select(MovieORM.title) → (equivalente a SELECT title FROM tabla)
+    results = select(MovieORM)
     movie_name = movie_name or name
     
     if movie_name:
-        movie_name = movie_name.lower().strip()
-        results = [ movie for movie in results if movie_name in movie["title"].lower()]
+        movie_name = movie_name.strip()
+        # Concatena dinámicamente la cláusula WHERE a la consulta base. Sobreescribimos 'results' porque .where() devuelve una consulta nueva.
+        results = results.where(MovieORM.title.ilike(f"%{movie_name}%"))
 
-    total = len(results)
+
+    total = db.scalar(select(func.count()).select_from(results.subquery())) or 0
+    # 4. Viaja a la BD, ejecuta la consulta y rompe la tupla resultante para darnos el número entero puro (ej. 15).
+    # 3. Prepara la instrucción "SELECT COUNT(*)".
+    # 2. Prepara la instrucción "FROM" indicando de dónde va a contar.
+    # 1. Toma nuestra consulta base (con todos sus filtros WHERE), la encierra en paréntesis y la vuelve una "tabla temporal".
+    # 5. Defensa de Python: Si el conteo por alguna razón falla y devuelve 'None', asigna '0' por defecto.
+
     total_pages = ceil(total/limit)
 
-    results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
-    start = (page*limit)-limit
-    end = min(page*limit, total)
-    items = results[ start : end ]
-    has_prev = start>=limit
-    has_next = end<total
+    # # Convertimos la columna a minúsculas solo para el cálculo del orden.
+    # order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
+    # # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
+    # results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+
+    if order_by == "title":
+        order_col = func.lower(MovieORM.title) # if order_by == "title" else func.lower(MovieORM.director)
+        # Tomamos el objeto de la columna (order_col), le indicamos la dirección (.asc o .desc) y finalmente concatenamos este "ORDER BY" a nuestra consulta principal 'results'.
+        results = results.order_by(order_col.asc() if direction == "asc" else order_col.desc())
+    else: 
+        results = results.join(MovieORM.director).order_by(DirectorORM.name.asc() if direction == "asc" else DirectorORM.name.desc())
+        #.order_by(MovieORM.asc() if direction == "asc" else order_col.desc())
+
+    # results = sorted(results, key=lambda movie: movie[order_by] if order_by == "title" else movie[order_by]["name"], reverse=(direction == "desc"))
+    # start = (page*limit)-limit
+    # end = min(page*limit, total)
+    # items = results[ start : end ]
+    if page > total_pages and total > 0:
+        page = 1
+
+    if total_pages == 0:
+        items: list[MovieORM] = []
+        has_prev = False
+        has_next = False 
+    else:
+        skip = (page-1)*limit
+        #db.execute(): Viaja a la BD y trae los registros (en formato de tuplas).
+        # .scalars(): Rompe las tuplas y extrae el objeto MovieORM puro.
+        # .all(): Recolecta todos los objetos puros y los mete en una lista de Python [MovieORM, MovieORM].
+        items = db.execute(results.limit(limit).offset(skip)).scalars().all()
+        
+        has_prev = page > 1
+        has_next = page < total_pages
     # PaginatedMovies(total=total, limit=limit, offset=offset, items=items)
     return PaginatedMovies(
         page=page,
@@ -306,46 +417,100 @@ def filter_by_genres(
     genres: list[str] = Query(
         ...,
         min_length=1,
+        max_length=5,
         description="One or more genres. Example ?genres=drama&genres=humor"
-    )
+    ),
+    db: Session = Depends(get_db)
 ):
-    genre_lower = [genre.lower() for genre in genres]
+    genre_list = [genre.strip().title() for genre in genres]
 
-    return [
-        movie
-        for movie in MOVIES
-        # any() devuelve True si al menos uno de los géneros de la película coincide con los buscados (deteniéndose en la primera coincidencia para ahorrar recursos).
-        if any(genre['name'].lower() in genre_lower for genre in movie.get("genres", []))
-]
+    results = db.scalars(select(MovieORM).distinct().join(MovieORM.genres).where(GenreORM.name.in_(genre_list))).all()
+
+    return results
+
+    # return [
+    #     movie
+    #     for movie in MOVIES
+    #     # any() devuelve True si al menos uno de los géneros de la película coincide con los buscados (deteniéndose en la primera coincidencia para ahorrar recursos).
+    #     if any(genre['name'].lower() in genre_lower for genre in movie.get("genres", []))
+    # ]
 
 
 
 # response_model usa Union para permitir retornar dos esquemas distintos: detallado (MoviePublic) o resumido (MovieSumary).
 # @app.get("/movies/{movie_id}", response_model=Union[MoviePublic, MovieSumary], response_description="Movie Found")
-@app.get("/movies/{movie_id}", response_model=MoviePublic | MovieSumary, response_description="Movie Found")
+@app.get("/movies/{movie_id}", response_model=MoviePublic | MovieSumaryTemp, response_description="Movie Found")
 def get_movie(
     movie_id: UUID,
     detailed: bool = Query(
         default=True, description="Include detailes about the movie"
     ),
+    db: Session = Depends(get_db)
 ):
-    for movie in MOVIES:
-        if movie['id'] == movie_id.hex:
-            if detailed:
-                return movie
-            return {
-                    "id": movie["id"],
-                    "title": movie["title"],
-                    "director": movie["director"],
-                    "year": movie["year"]
-                }
-    raise HTTPException(status_code=404, detail="Movie Not Found")
+    movie = db.get(MovieORM, movie_id) # obtiene un solo registro de la db utilizando unicamente su identificador
+
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    if detailed:
+        # model_validate() → Traduce y valida manualmente un objeto crudo de SQLAlchemy a este esquema de Pydantic.
+        # (Nota: FastAPI hace esto en automático al salir si el endpoint tiene 'response_model').
+        return MoviePublic.model_validate(movie, from_attributes=True) 
+    return MovieSumaryTemp.model_validate(movie, from_attributes=True)
 
 
 
-@app.post("/create_movie", status_code=201, response_model=MovieCreateResponse)
-def create_movie(movie_json: MovieCreate):
-    new_id = uuid4().hex
+@app.post("/create_movie", status_code=status.HTTP_201_CREATED, response_model=MovieCreateResponse, response_description="Movie created (ok)")
+def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
+
+    if db.scalar(select(MovieORM).where(MovieORM.title.ilike(movie_json.title.strip()))):
+        raise HTTPException(status_code=409, detail="Movie already exists")
+
+    director = db.scalar(select(DirectorORM).where(DirectorORM.name.ilike(movie_json.director.name.strip())))
+    
+    if not director:
+        director = DirectorORM(
+            id=uuid4(),
+            name=movie_json.director.name.strip()
+        )
+
+    genres_set= set()
+    genres_list=[]
+    for i in movie_json.genres:
+        genre_name = i.name.strip().title()
+        if genre_name in genres_set:
+            continue
+        genre = db.scalar(select(GenreORM).where(GenreORM.name.ilike(genre_name))) 
+        genres_set.add(genre_name)
+        if not genre:
+            genre = GenreORM(
+                id=uuid4(),
+                name=genre_name
+            )
+        genres_list.append(genre)
+
+    new_movie = MovieORM(
+        id=uuid4(),
+        title=movie_json.title.strip(), 
+        year=movie_json.year,
+        rating=movie_json.rating,
+        description=movie_json.description,
+        director=director,
+        genres=genres_list
+    )
+    try: 
+        db.add(new_movie)
+        db.commit()
+        db.refresh(new_movie)
+        return new_movie
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This title already exist")
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error creating movie")
+    
     # new_movie = {
     #     "id": new_id,
     #     "title": movie_json.title,
@@ -355,45 +520,131 @@ def create_movie(movie_json: MovieCreate):
     #     "rating" : movie_json.rating,
     #     "description" : movie_json.description,
     # }
-    new_movie = movie_json.model_dump()
-    new_movie["id"] = new_id
-    MOVIES.append(new_movie)
-    return  {**new_movie, "message":"Movie created"}
+    # new_movie = movie_json.model_dump()
+    # new_movie["id"] = new_id
+    # MOVIES.append(new_movie)
+    # return  {**new_movie, "message":"Movie created"}
 
 
 
+# @app.put("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
 @app.put("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
-def update_movie(movie_id: str, data: MovieUpdate):
-    for movie in MOVIES:
-        if movie["id"] == movie_id:
-            movie["title"] = data.title
-            movie["year"] = data.year
-            movie["genres"] = data.genres
-            movie["director"] = data.director
-            movie["rating"] = data.rating
-            movie["description"] = data.description
-            # El operador ** (unpacking) "abre" el diccionario de la película.
-            # **movie "desempaqueta" el diccionario original, extrayendo todas sus llaves y valores al nivel principal para crear un diccionario plano.
-            return { **movie, "message":"Movie Updated"} 
-    raise HTTPException(status_code=404, detail="Movie not found")
+def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db)):
+    movie = db.get(MovieORM, movie_id)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    movie_update =( update(MovieORM).where(MovieORM.id == movie_id).values(title=data.title,year=data.year,rating=data.rating,description=data.description) )
+    print(f"mod_movie: {movie_update}")
+    try: 
+        db.execute(movie_update)
+        db.commit()
+        return movie
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error updating movie")
+
+    # for movie in MOVIES:
+    #     if movie["id"] == movie_id:
+    #         movie["title"] = data.title
+    #         movie["year"] = data.year
+    #         movie["genres"] = data.genres
+    #         movie["director"] = data.director
+    #         movie["rating"] = data.rating
+    #         movie["description"] = data.description
+    #         # El operador ** (unpacking) "abre" el diccionario de la película.
+    #         # **movie "desempaqueta" el diccionario original, extrayendo todas sus llaves y valores al nivel principal para crear un diccionario plano.
+    #         return { **movie, "message":"Movie Updated"} 
+    # raise HTTPException(status_code=404, detail="Movie not found")
 
 
 
 @app.patch("/movies/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated", response_model_exclude_none=True) #exclude_none quita los que tengan none de la respuesta
-def update_movie_patch(movie_id: str, data: MoviePatch):
-    for movie in MOVIES:
-        if movie["id"] == movie_id:
-            payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
-            movie.update(payload)
-            return {"message":"Movie Updated", **movie}
-    raise HTTPException(status_code=404, detail="Movie not found")
+def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(get_db)):
+
+    record = db.get(MovieORM, movie_id)
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    if data.title and db.scalar(select(MovieORM).where(MovieORM.title.ilike(data.title.strip()), MovieORM.id != movie_id)):
+        raise HTTPException(status_code=409, detail="Movie already exists")
+
+    update_data = data.model_dump(exclude_unset=True)
+    director = update_data.pop("director", None)
+    genres = update_data.pop("genres", None)
+
+    for k,v in update_data.items():
+        setattr(record,k,v)
+
+    if director:
+        director_record = db.scalar(select(DirectorORM).where(DirectorORM.name.ilike(f"{director['name']}")))
+        if not director_record:
+            director_record = DirectorORM(
+                        id=uuid4(),
+                        name=director['name'].strip()
+                    )
+        record.director = director_record
+
+    genres_set= set()
+    genres_list=[]
+    if genres is not None:
+        for i in genres:
+            genre_name = i.get("name")
+            genre_name = genre_name.strip().title()
+            if genre_name in genres_set:
+                continue
+            genre = db.scalar(select(GenreORM).where(GenreORM.name.ilike(genre_name))) 
+            genres_set.add(genre_name)
+            if not genre:
+                genre = GenreORM(
+                    id=uuid4(),
+                    name=genre_name
+                )
+            genres_list.append(genre)
+        record.genres = genres_list
+
+    try: 
+        db.commit()
+        db.refresh(record)
+        return record
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This title already exist")
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error updating movie")
+
+    # for movie in MOVIES:
+    #     if movie["id"] == movie_id:
+    #         payload = data.model_dump(exclude_unset=True) # model_dump() → convierte tu modelo de datos en un diccionario de Python, pero ignorando cualquier campo que el usuario no haya enviado explícitamente.
+    #         movie.update(payload)
+    #         return {"message":"Movie Updated", **movie}
+    # raise HTTPException(status_code=404, detail="Movie not found")
 
 
 
 @app.delete("/movies/{movie_id}", status_code=204)
-def delete_movie(movie_id: str):
-    for index, movie in enumerate(MOVIES):
-        if movie["id"] == movie_id:
-            MOVIES.pop(index)
-            return 
-    raise HTTPException(status_code=404, detail="Movie not found")
+def delete_movie(movie_id: UUID, db: Session = Depends(get_db)):
+    movie = db.get(MovieORM, movie_id)
+    if not movie:
+        raise HTTPException(status_code=404, detail="Movie not found")
+
+    delete_movie = delete(MovieORM).where(MovieORM.id == movie_id)
+
+    try:
+        db.execute(delete_movie)
+        db.commit()
+        return 
+    except SQLAlchemyError as e:
+        db.rollback()
+        print(f"ERROR DE SQLALCHEMY: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting movie")
+
+    # for index, movie in enumerate(MOVIES):
+    #     if movie["id"] == movie_id:
+    #         MOVIES.pop(index)
+    #         return 
+    # raise HTTPException(status_code=404, detail="Movie not found")
