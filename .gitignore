@@ -11,3 +11,6 @@ wheels/
 
 #sqlite DB
 *.db
+
+#Credentials 
+.env

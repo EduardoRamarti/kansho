@@ -4,6 +4,7 @@ from math import ceil
 from typing import Literal
 from uuid import UUID, uuid4
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
@@ -33,9 +34,11 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+load_dotenv()
+
 #Para conectarse a la BD, si no hay un env crea un sqlite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./movies.db")
-print("Connected to: ", DATABASE_URL)
+#print("Connected to: ", DATABASE_URL)
 
 engine_kwargs = {}
 
