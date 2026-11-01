@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from app.core.db import Base
 from sqlalchemy import (
     Column,
     DateTime,
@@ -22,6 +21,8 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
+
+from src.kansho.core.db import Base
 
 if TYPE_CHECKING:
     from .director import DirectorORM

@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from app.core.db import Base
 from sqlalchemy import String, Uuid
 from sqlalchemy.orm import (
     Mapped,
     mapped_column,
     relationship,
 )
+
+from src.kansho.core.db import Base
 
 if TYPE_CHECKING:
     from .movie import MovieORM
