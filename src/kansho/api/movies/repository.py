@@ -9,7 +9,7 @@ from src.kansho.models.genre import GenreORM
 from src.kansho.models.movie import MovieORM
 
 
-class PostRespository:
+class MovieRespository:
     def __init__(self, db: Session):
         self.db = db
 
