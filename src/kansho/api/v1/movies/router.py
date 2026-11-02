@@ -116,7 +116,7 @@ def get_movie(
     ),
     db: Session = Depends(get_db)
 ):
-    repo = MovieRespository()
+    repo = MovieRespository(db)
     movie = repo.get_movie(movie_id)
     if not movie:
         raise HTTPException(status_code=404, detail="Movie not found")

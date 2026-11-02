@@ -1,7 +1,7 @@
 from math import ceil
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, func, null, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from kansho.models.director import DirectorORM
