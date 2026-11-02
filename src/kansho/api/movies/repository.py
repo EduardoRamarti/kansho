@@ -4,9 +4,9 @@ from uuid import UUID, uuid4
 from sqlalchemy import delete, func, null, select, update
 from sqlalchemy.orm import Session
 
-from src.kansho.models.director import DirectorORM
-from src.kansho.models.genre import GenreORM
-from src.kansho.models.movie import MovieORM
+from kansho.models.director import DirectorORM
+from kansho.models.genre import GenreORM
+from kansho.models.movie import MovieORM
 
 
 class MovieRespository:
@@ -16,6 +16,11 @@ class MovieRespository:
     def get_movie(self, movie_id:UUID) -> MovieORM | None:
         find_movie = select(MovieORM).where(MovieORM.id == movie_id)
         return self.db.execute(find_movie).scalar_one_or_none()
+
+    def get_movie_by_title(self, title: str, movie_id: UUID | None = None) -> MovieORM | None:
+        if movie_id:
+            return self.db.scalar(select(MovieORM).where(MovieORM.title.ilike(title.strip()), MovieORM.id != movie_id))
+        return self.db.scalar(select(MovieORM).where(MovieORM.title.ilike(title.strip())))
 
     def search(self, movie_name: str | None, order_by: str, direction: str, page: int, limit: int ) -> tuple[int, list[MovieORM]]:
         
@@ -88,7 +93,7 @@ class MovieRespository:
             genres_list.append(genre)
         return genres_list
 
-    def create_movie(self, title: str, year: int, rating: float, description: str, director: dict, genres: list[dict]):
+    def create_movie(self, title: str, year: int, rating: float, description: str, director: dict, genres: list[dict]) -> MovieORM:
         director_record = self.ensure_director(director.get("name"))
         genres_record = self.ensure_genre(genres)
         movie = MovieORM(
