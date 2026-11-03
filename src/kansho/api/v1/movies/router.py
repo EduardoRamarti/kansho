@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from kansho.core.db import get_db
+from kansho.core.security import oauth2_scheme
 
 from .repository import MovieRespository
 from .schemas import (
@@ -23,6 +24,14 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/movies", tags=["movies"])
+
+def get_fake_user():
+    return {"username": "Mike", "role": "admin"}
+
+@router.get("/me")
+def read_me(user: dict = Depends(get_fake_user)):
+    return {"user": user}
+
 
 @router.get("", response_model=PaginatedMovies)
 def list_movies(
@@ -218,3 +227,7 @@ def delete_movie(movie_id: UUID, db: Session = Depends(get_db)):
         db.rollback()
         print(f"ERROR DE SQLALCHEMY: {e}")
         raise HTTPException(status_code=500, detail="Error deleting movie")
+
+@router.get("/secure")
+def secure_endpoint(token: str = Depends(oauth2_scheme)): # Depends le dice a FastAPI: “antes de ejecutar este endpoint, consígueme este valor llamando a esta función”
+    return {"message":"Token Access", "Token_received":token}
