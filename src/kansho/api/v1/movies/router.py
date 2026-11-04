@@ -1,3 +1,6 @@
+import asyncio
+import threading
+import time
 from math import ceil
 from typing import Literal
 from uuid import UUID
@@ -25,13 +28,26 @@ from .schemas import (
 
 router = APIRouter(prefix="/movies", tags=["movies"])
 
-def get_fake_user():
-    return {"username": "Mike", "role": "admin"}
+# def get_fake_user():
+#     return {"username": "Mike", "role": "admin"}
 
-@router.get("/me")
-def read_me(user: dict = Depends(get_fake_user)):
-    return {"user": user}
+# @router.get("/me")
+# def read_me(user: dict = Depends(get_fake_user)):
+#     return {"user": user}
 
+# Testing Async 
+
+# @router.get("/sync")
+# def sync_endpoint():
+#     print("SYNC theread: ", threading.current_thread().name)
+#     time.sleep(8)
+#     return {"message": "Funcion sincrona termino"}
+
+# @router.get("/async")
+# async def async_endpoint():
+#     print("ASYNC theread: ", threading.current_thread().name)
+#     await asyncio.sleep(8)
+#     return {"message": "Funcion asincrona termino"}
 
 @router.get("", response_model=PaginatedMovies)
 def list_movies(
@@ -41,7 +57,7 @@ def list_movies(
         description="Deprecated param, use 'search' instead"
     ),
     movie_name: str | None = Query(
-        default=None, 
+        default=None,
         description="Search a movie by tittle",
         alias="search",
         min_length=3,
@@ -55,13 +71,13 @@ def list_movies(
         le=50,
         description="Total results (1-50)"
     ),
-    # Set where to start showing the movies, example: from which movie start 
+    # Set where to start showing the movies, example: from which movie start
     page: int = Query(
         default=1,
         ge=1,
         description="Set page to show items"
     ),
-    # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras. 
+    # Literal["id", "title"] restringe este parámetro para que SOLO acepte exactamente esas dos palabras.
     # Si el usuario intenta mandar "year" o cualquier otra cosa, FastAPI lo bloquea automáticamente con un error 422.
     order_by: Literal["title", "director"] = Query(
         "title", description="Order by Movie title or Movie Director"
@@ -69,7 +85,8 @@ def list_movies(
     direction: Literal["asc", "desc"] = Query(
         "asc", description="Order direction"
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
 ):
     repo = MovieRespository(db)
     movie_name = movie_name or name
@@ -84,7 +101,7 @@ def list_movies(
     total_pages = ceil(total/limit)
     if total_pages == 0:
         has_prev = False
-        has_next = False 
+        has_next = False
     else:
         has_prev = page > 1
         has_next = page < total_pages
@@ -110,7 +127,8 @@ def filter_by_genres(
         max_length=5,
         description="One or more genres. Example ?genres=drama&genres=humor"
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
 ):
     repo = MovieRespository(db)
     genre_list = [genre.strip().title() for genre in genres]
@@ -123,13 +141,14 @@ def get_movie(
     detailed: bool = Query(
         default=True, description="Include detailes about the movie"
     ),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
 ):
     repo = MovieRespository(db)
     movie = repo.get_movie(movie_id)
     if not movie:
         raise HTTPException(status_code=404, detail="Movie not found")
-    
+
     # model_validate() → Traduce y valida manualmente un objeto crudo de SQLAlchemy a este esquema de Pydantic.
     # (Nota: FastAPI hace esto en automático al salir si el endpoint tiene 'response_model').
     return MoviePublic.model_validate(movie, from_attributes=True) if detailed else MovieSumary.model_validate(movie, from_attributes=True)
@@ -143,11 +162,11 @@ def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db), user=De
         raise HTTPException(status_code=409, detail="Movie already exists")
     try:
         new_movie = repo.create_movie(
-            title=movie_json.title, 
-            year=movie_json.year, 
-            rating=movie_json.rating, 
-            description=movie_json.description, 
-            director=movie_json.director.model_dump(), 
+            title=movie_json.title,
+            year=movie_json.year,
+            rating=movie_json.rating,
+            description=movie_json.description,
+            director=movie_json.director.model_dump(),
             genres=[movie_genre.model_dump() for movie_genre in movie_json.genres]
         )
         return new_movie
@@ -166,7 +185,7 @@ def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Movie not found")
     if data.title and repo.get_movie_by_title(title=data.title, movie_id=movie_id):
         raise HTTPException(status_code=409, detail="Movie already exists")
-    try: 
+    try:
         movie = repo.full_movie_update(
             movie_id=movie_id,
             title=data.title,
@@ -195,7 +214,7 @@ def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(g
     update_data = data.model_dump(exclude_unset=True)
     director_data = update_data.pop("director", None)
     genres = update_data.pop("genres", None)
-    try: 
+    try:
         record = repo.partial_movie_update(
             movie_id=movie_id,
             title=data.title,
@@ -222,7 +241,7 @@ def delete_movie(movie_id: UUID, db: Session = Depends(get_db), user=Depends(get
         raise HTTPException(status_code=404, detail="Movie not found")
     try:
         repo.delete_movie(movie_id=movie_id)
-        return 
+        return
     except SQLAlchemyError as e:
         db.rollback()
         print(f"ERROR DE SQLALCHEMY: {e}")

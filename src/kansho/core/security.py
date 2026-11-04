@@ -13,6 +13,28 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login") # Creas un objeto de esa clase, configurado con la ruta de tu login
 
+credentials_exception = HTTPException( # Creando la excepción 
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Not Authenticated",
+    headers={"WWW_Authenticate": "Bearer"}
+)
+
+def raise_expire_token():
+    return HTTPException( # Creando la excepción 
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Expired Token",
+    headers={"WWW_Authenticate": "Bearer"}
+    )
+
+def raise_forbidden():
+    return HTTPException( # Creando la excepción 
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail="Not Allowed",
+    headers={"WWW_Authenticate": "Bearer"}
+)
+
+
+
 
 # Cuando el usuario demuestra quién es (usuario y contraseña correctos), esta función le fabrica su token con fecha de expiración
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
@@ -30,13 +52,6 @@ def decode_token(token: str) -> dict:
 
 # dependencia que pones en los endpoints protegidos
 def get_current_user(token: str = Depends(oauth2_scheme)):
-
-    credentials_exception = HTTPException( # Creando la excepción 
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not Authenticated",
-        headers={"WWW_Authenticate": "Bearer"}
-    )
-
     try:
         playload = decode_token(token)
         subject: str | None = playload.get("sub")
@@ -45,10 +60,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
             raise credentials_exception
         return {"email": subject, "username": username}
     except ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Expired Token",
-            headers={"WWW_Authenticate": "Bearer"}
-        )
+        raise raise_expire_token()
     except InvalidTokenError:
         raise credentials_exception
