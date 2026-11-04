@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordRequestForm
 
 from kansho.core.security import create_access_token, get_current_user
 
@@ -16,7 +16,8 @@ FAKE_USERS = {
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordBearer = Depends()):
+# OAuth2PasswordRequestForm → lee el usuario y la contraseña que vienen en el formulario de la petición y entrégamelos en un objeto
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = FAKE_USERS.get(form_data.username)
     if not user or user['password'] != form_data.password:
         raise HTTPException(

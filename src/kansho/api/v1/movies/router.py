@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from kansho.core.db import get_db
-from kansho.core.security import oauth2_scheme
+from kansho.core.security import get_current_user, oauth2_scheme
 
 from .repository import MovieRespository
 from .schemas import (
@@ -135,7 +135,7 @@ def get_movie(
     return MoviePublic.model_validate(movie, from_attributes=True) if detailed else MovieSumary.model_validate(movie, from_attributes=True)
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=MovieCreateResponse, response_description="Movie created (ok)")
-def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
+def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
 
     repo = MovieRespository(db)
 
@@ -160,7 +160,7 @@ def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Error creating movie")
 
 @router.put("/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")
-def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db)):
+def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     repo = MovieRespository(db)
     if not repo.get_movie(movie_id=movie_id):
         raise HTTPException(status_code=404, detail="Movie not found")
@@ -186,7 +186,7 @@ def update_movie(movie_id: UUID, data: MovieUpdate, db: Session = Depends(get_db
         raise HTTPException(status_code=500, detail="Error updating movie")
 
 @router.patch("/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated", response_model_exclude_none=True) #exclude_none quita los que tengan none de la respuesta
-def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(get_db)):
+def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(get_db), user=Depends(get_current_user)):
     repo = MovieRespository(db)
     if not repo.get_movie(movie_id=movie_id):
         raise HTTPException(status_code=404, detail="Movie not found")
@@ -215,7 +215,7 @@ def update_movie_patch(movie_id: UUID, data: MoviePatch, db: Session = Depends(g
         raise HTTPException(status_code=500, detail="Error updating movie")
 
 @router.delete("/{movie_id}", status_code=204)
-def delete_movie(movie_id: UUID, db: Session = Depends(get_db)):
+def delete_movie(movie_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     repo = MovieRespository(db)
 
     if not repo.get_movie(movie_id=movie_id):
