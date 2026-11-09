@@ -1,17 +1,16 @@
-import asyncio
-import threading
-import time
+
 from math import ceil
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from psycopg import IntegrityError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from kansho.core.db import get_db
 from kansho.core.security import get_current_user, oauth2_scheme
+from kansho.services.file_storage import save_upload_file
 
 from .repository import MovieRespository
 from .schemas import (
@@ -154,28 +153,32 @@ def get_movie(
     return MoviePublic.model_validate(movie, from_attributes=True) if detailed else MovieSumary.model_validate(movie, from_attributes=True)
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=MovieCreateResponse, response_description="Movie created (ok)")
-def create_movie(movie_json: MovieCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_movie(movie_json: Annotated[MovieCreate, Depends(MovieCreate.as_form)], image: UploadFile | None = File(None), db: Session = Depends(get_db), user=Depends(get_current_user)):
 
     repo = MovieRespository(db)
 
     if repo.get_movie_by_title(movie_json.title):
         raise HTTPException(status_code=409, detail="Movie already exists")
+    saved = None
     try:
+        if image is not None:
+            saved = save_upload_file(image)
+        image_url = saved["url"] if saved else None
         new_movie = repo.create_movie(
             title=movie_json.title,
             year=movie_json.year,
             rating=movie_json.rating,
             description=movie_json.description,
             director=movie_json.director.model_dump(),
-            genres=[movie_genre.model_dump() for movie_genre in movie_json.genres]
+            genres=[movie_genre.model_dump() for movie_genre in movie_json.genres],
+            image_url=image_url
         )
         return new_movie
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="This title already exist")
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         db.rollback()
-        print(f"ERROR DE SQLALCHEMY: {e}")
         raise HTTPException(status_code=500, detail="Error creating movie")
 
 @router.put("/{movie_id}", response_model=MovieUpdateResponse, response_description="Movie Updated")

@@ -50,6 +50,7 @@ class MovieORM(Base):
     rating: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    image_url = mapped_column(String(300), nullable=True)
 
     director_id: Mapped[UUID] = mapped_column(ForeignKey("directors.id")) # Crea la columna de director como FK
     # Relación muchos a uno: cada película tiene un director.

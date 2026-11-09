@@ -1,6 +1,8 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
+from fastapi import Form
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -31,6 +33,7 @@ class MovieBase(BaseModel):
     director: Director
     rating: float
     description: str
+    image_url: str | None = None
 
 class MovieCreate(BaseModel):
     title: str = Field(
@@ -67,6 +70,25 @@ class MovieCreate(BaseModel):
         if "spam" in value.lower():
             raise ValueError("The title cannot set this word: 'spam'")
         return value
+
+    @classmethod
+    def as_form(
+        cls, 
+        title: Annotated[str, Form(min_length=3)],
+        year: Annotated[float,Form(gt=0)],
+        director: Annotated[str, Form(min_length=10)],
+        rating: Annotated[float, Form(gt=0)], 
+        description: Annotated[str, Form(min_length=50)],
+        genres: Annotated[list[str]|None, Form()] = None,
+        ):
+        gen_obj = [
+        Genre(name=g.strip())
+        for item in (genres or [])
+        for g in item.split(",")
+        if g.strip()
+        ]
+        director = Director(name=director)
+        return cls(title=title, year=year, director=director, rating=rating, description=description, genres=gen_obj)
 
 class MovieUpdate(BaseModel):
     title: str = Field(
@@ -138,7 +160,7 @@ class MovieCreateResponse(BaseModel):
     year: int
     rating: float
     description: str
-
+    image_url: str
     # Le da permiso a Pydantic de leer datos desde objetos ORM de SQLAlchemy (obj.atributo) 
     # y no solo desde diccionarios. Sin esto, FastAPI no podría traducir la base de datos a JSON.
     model_config = ConfigDict(from_attributes=True)
