@@ -6,6 +6,8 @@ from fastapi import File, HTTPException, UploadFile, status
 
 MEDIA_DIR = "media"
 ALLOW_MIME = ["image/png", "image/jpeg"]
+MAX_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+CHUNKS = 1024 * 1024
 
 def ensure_media_dir() -> None:
     os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -21,7 +23,16 @@ def save_upload_file(file: UploadFile) -> dict:
     file_path = os.path.join(MEDIA_DIR, filename) # 3. armo la ruta destino: "kansho/media/3f9a...e2.png" (solo texto)
 
     with open(file_path, "wb") as buffer: # wb → crear el archivo y escribe en binario 
-        shutil.copyfileobj(file.file, buffer) # copyfileobj → Copia de un objeto archivo abierto a otro (la de tu código)
+        shutil.copyfileobj(file.file, buffer, length=CHUNKS) # copyfileobj → Copia de un objeto archivo abierto a otro (la de tu código)
+
+    size = os.path.getsize(file_path)
+    if size > MAX_MB * CHUNKS:
+        os.remove(file_path)
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File grater than {MAX_MB} MB"
+        )
+    
     return {
         "filename": filename,
         "content_type": file.content_type,

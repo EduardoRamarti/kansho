@@ -1,6 +1,7 @@
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 
+from kansho.core.security import get_current_user
 from kansho.services.file_storage import save_upload_file
 
 router = APIRouter(prefix="/upload", tags=["uploads"])
@@ -22,7 +23,7 @@ MEDIA_DIR = "media"
 #     }
 
 @router.post("/save")
-async def save_file(file: UploadFile = File(...)):
+async def save_file(file: UploadFile = File(...), user=Depends(get_current_user)):
 
     saved = save_upload_file(file)
 
