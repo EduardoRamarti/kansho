@@ -93,7 +93,7 @@ class MovieRespository:
             genres_list.append(genre)
         return genres_list
 
-    def create_movie(self, title: str, year: int, rating: float, description: str, director: dict, genres: list[dict]) -> MovieORM:
+    def create_movie(self, title: str, year: int, rating: float, description: str, director: dict, genres: list[dict], image_url: str) -> MovieORM:
         director_record = self.ensure_director(director.get("name"))
         genres_record = self.ensure_genre(genres)
         movie = MovieORM(
@@ -103,7 +103,8 @@ class MovieRespository:
             rating=rating,
             description=description,
             director=director_record,
-            genres=genres_record
+            genres=genres_record,
+            image_url=image_url
         )
         self.db.add(movie)
         self.db.commit()
