@@ -1,11 +1,16 @@
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pwdlib import PasswordHash
+from sqlalchemy.orm import Session
 
+from kansho.core.db import get_db
 from kansho.core.security import create_access_token, get_current_user
 
-from .schemas import Token, UserPublic
+from .repository import AuthRepository
+from .schemas import Token, UserPublic, UserRegister
 
 FAKE_USERS = {
     "faker@example.com": {"email": "fake@example.com", "username": "faker", "password": "secret123"},
@@ -14,6 +19,20 @@ FAKE_USERS = {
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+@router.post("/sign-up", response_model=UserPublic, status_code=201)
+async def signup(user: Annotated[UserRegister, Depends(UserRegister.as_form)], db: Session = Depends(get_db)):
+    repo = AuthRepository(db)
+    if repo.search_user(username=user.username, email=user.email):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Conflict")
+    hasher = PasswordHash.recommended()
+    hashed_passw = hasher.hash(user.passw)
+    new_user = repo.create_new_user(
+        username=user.username,
+        email=user.email,
+        passw=hashed_passw
+    )
+    return new_user
 
 @router.post("/login", response_model=Token)
 # OAuth2PasswordRequestForm → lee el usuario y la contraseña que vienen en el formulario de la petición y entrégamelos en un objeto
