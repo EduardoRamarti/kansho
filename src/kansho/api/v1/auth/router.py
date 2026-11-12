@@ -3,7 +3,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from psycopg import IntegrityError
 from pwdlib import PasswordHash
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from kansho.core.db import get_db
@@ -25,14 +27,21 @@ async def signup(user: Annotated[UserRegister, Depends(UserRegister.as_form)], d
     repo = AuthRepository(db)
     if repo.search_user(username=user.username, email=user.email):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Conflict")
-    hasher = PasswordHash.recommended()
-    hashed_passw = hasher.hash(user.passw)
-    new_user = repo.create_new_user(
-        username=user.username,
-        email=user.email,
-        passw=hashed_passw
-    )
-    return new_user
+    try: 
+        hasher = PasswordHash.recommended()
+        hashed_passw = hasher.hash(user.passw)
+        new_user = repo.create_new_user(
+            username=user.username,
+            email=user.email,
+            passw=hashed_passw
+        )
+        return new_user
+    except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Conflict")
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error creating User")
 
 @router.post("/login", response_model=Token)
 # OAuth2PasswordRequestForm → lee el usuario y la contraseña que vienen en el formulario de la petición y entrégamelos en un objeto
