@@ -15,10 +15,13 @@ class AuthRepository:
     def search_user_by_id(self, user_id: UUID):
         return self.db.get(UserORM, user_id)
 
-    def search_user(self, username: str , email: str):
+    def search_user_register(self, username: str , email: str):
         query = select(exists().where(or_(UserORM.username.ilike(username), UserORM.email.ilike(email))))
         return self.db.scalar(query)
 
+    def search_user_login(self, email: str):
+        query = select(UserORM).where(UserORM.email.ilike(email))
+        return self.db.scalar(query)
 
     def create_new_user(self, username: str, email: str, passw: str) -> UserORM:
         new_user = UserORM(
