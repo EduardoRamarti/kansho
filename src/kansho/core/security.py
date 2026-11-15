@@ -1,15 +1,20 @@
 
 import os
+import random
+import string
 from datetime import datetime, timedelta, timezone
 
 # OAuth2PasswordBearer → herramienta ya hecha para leer tokens del tipo “Bearer” de las peticiones.
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jwt import ExpiredSignatureError, InvalidTokenError, decode, encode
+from pwdlib import PasswordHash
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+DUMMY_PH = PasswordHash.recommended().hash(''.join(random.choices(string.ascii_letters + string.digits,k=16)))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login") # Creas un objeto de esa clase, configurado con la ruta de tu login
 
@@ -54,11 +59,10 @@ def decode_token(token: str) -> dict:
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         playload = decode_token(token)
-        subject: str | None = playload.get("sub")
-        username: str | None = playload.get("username")
-        if not subject or not username:
+        user_id: str | None = playload.get("sub")
+        if not user_id:
             raise credentials_exception
-        return {"email": subject, "username": username}
+        return {"user_id": user_id}
     except ExpiredSignatureError:
         raise raise_expire_token()
     except InvalidTokenError:

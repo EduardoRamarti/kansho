@@ -1,6 +1,7 @@
 
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Form
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -29,3 +30,6 @@ class UserRegister(UserPublic):
         passw: Annotated[str, Form(min_length=8, max_length=64)]
     ):
         return cls(email=email, username=username, passw=passw)
+
+class UserPublicInfo(UserPublic):
+    user_id: UUID
